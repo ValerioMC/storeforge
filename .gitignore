@@ -1,0 +1,13 @@
+.DS_Store
+/.idea/
+.env
+.env.*
+!.env.example
+node_modules/
+dist/
+src-tauri/target/
+src-tauri/gen/
+.impeccable/*
+!.impeccable/design.json
+coverage/
+.artifacts/
