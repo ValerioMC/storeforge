@@ -1,0 +1,104 @@
+mod administration;
+mod audit;
+mod bucket;
+mod common;
+mod connection;
+#[cfg(target_os = "macos")]
+mod dock_icon;
+mod object;
+mod transfer;
+
+use std::sync::Arc;
+
+use tauri::{Manager, WebviewWindowBuilder};
+
+use administration::{controller as administration_commands, service::AdministrationService};
+use audit::{controller as audit_commands, service::AuditService};
+use bucket::controller as bucket_commands;
+use connection::{
+    controller as connection_commands, repository::ConnectionRepository, service::ConnectionService,
+};
+use object::controller as object_commands;
+use transfer::{
+    controller as transfer_commands, repository::JobRepository, service::TransferService,
+};
+
+pub fn run() {
+    tracing_subscriber::fmt().with_target(false).init();
+    let builder = tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
+        .setup(|app| {
+            let directory = app.path().app_data_dir()?;
+            let connections = Arc::new(ConnectionService::new(ConnectionRepository::open(
+                directory.clone(),
+            )?));
+            let transfers = TransferService::new(
+                JobRepository::open(directory.clone())?,
+                Arc::clone(&connections),
+            );
+            app.manage(connections);
+            app.manage(transfers);
+            app.manage(AuditService::open(directory)?);
+            app.manage(AdministrationService::new()?);
+            create_main_window(app)?;
+            Ok(())
+        })
+        .invoke_handler(tauri::generate_handler![
+            connection_commands::list_connections,
+            connection_commands::save_connection,
+            connection_commands::remove_connection,
+            connection_commands::test_connection,
+            bucket_commands::list_buckets,
+            bucket_commands::create_bucket,
+            bucket_commands::delete_bucket,
+            bucket_commands::configure_bucket,
+            bucket_commands::export_bucket_configuration,
+            object_commands::list_objects,
+            object_commands::list_versions,
+            object_commands::object_details,
+            object_commands::object_tags,
+            object_commands::object_acl,
+            object_commands::preview_object,
+            object_commands::share_object,
+            object_commands::create_folder,
+            object_commands::change_object,
+            object_commands::list_multipart,
+            object_commands::abort_multipart,
+            transfer_commands::start_transfer,
+            transfer_commands::list_jobs,
+            transfer_commands::cancel_job,
+            transfer_commands::compare_locations,
+            transfer_commands::location_usage,
+            transfer_commands::check_integrity,
+            administration_commands::administer,
+            audit_commands::list_audit,
+        ]);
+    #[cfg(target_os = "macos")]
+    let builder = builder.on_window_event(dock_icon::on_window_event);
+    let result = builder
+        .build(tauri::generate_context!())
+        .map(|app| app.run(on_app_event));
+    if let Err(error) = result {
+        tracing::error!(%error, "StoreForge could not start");
+        std::process::exit(1);
+    }
+}
+
+fn on_app_event(_app: &tauri::AppHandle, _event: tauri::RunEvent) {
+    #[cfg(target_os = "macos")]
+    dock_icon::on_app_event(_app, _event);
+}
+
+fn create_main_window(app: &tauri::App) -> tauri::Result<()> {
+    let overlay = cfg!(target_os = "macos");
+    let chrome = if overlay { "overlay" } else { "custom" };
+    WebviewWindowBuilder::from_config(app, &app.config().app.windows[0])?
+        .decorations(overlay)
+        .initialization_script(format!("window.__storeforgeWindowChrome = '{chrome}'"))
+        .build()?;
+    Ok(())
+}
+
+#[cfg(test)]
+#[path = "../tests/integration/s3.rs"]
+mod s3_integration;

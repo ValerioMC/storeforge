@@ -1,0 +1,53 @@
+[package]
+name = "storeforge"
+version = "0.1.0"
+edition = "2024"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+aws-credential-types = "1"
+aws-sdk-s3 = { version = "1", default-features = false, features = ["default-https-client", "rt-tokio"] }
+aws-sigv4 = "1"
+base64 = "0.22"
+chrono = { version = "0.4", features = ["serde"] }
+http = "1"
+md-5 = "0.10"
+mime_guess = "2"
+percent-encoding = "2"
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls-native-roots"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tauri = { version = "2", features = [] }
+tauri-plugin-dialog = "2"
+tempfile = "3"
+thiserror = "2"
+tokio = { version = "1", features = ["fs", "io-util", "sync", "time", "macros"] }
+tracing = "0.1"
+tracing-subscriber = "0.3"
+url = "2"
+uuid = { version = "1", features = ["v4", "serde"] }
+zip = { version = "2", default-features = false }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+keyring = { version = "3", features = ["apple-native"] }
+objc2 = "0.6"
+objc2-app-kit = { version = "0.3", default-features = false, features = ["NSApplication", "NSImage"] }
+objc2-foundation = { version = "0.3", default-features = false, features = ["NSData"] }
+
+[target.'cfg(target_os = "windows")'.dependencies]
+keyring = { version = "3", features = ["windows-native"] }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+keyring = { version = "3", features = ["sync-secret-service", "crypto-rust", "vendored"] }
+
+[profile.dev]
+debug = 0
+
+[profile.dev.package.aws-sdk-s3]
+codegen-units = 256
+
+[profile.release.package.aws-sdk-s3]
+opt-level = 1
+codegen-units = 128

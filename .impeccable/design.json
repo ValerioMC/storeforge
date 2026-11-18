@@ -1,0 +1,423 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-11-18T12:53:21+00:00",
+  "title": "Design System: StoreForge",
+  "extensions": {
+    "colorMeta": {
+      "accent": {
+        "role": "primary",
+        "displayName": "Deep Cyan",
+        "tonalRamp": [
+          "oklch(15% 0.0244 219.4)",
+          "oklch(26% 0.0537 219.4)",
+          "oklch(38% 0.0782 219.4)",
+          "oklch(50% 0.0977 219.4)",
+          "oklch(62% 0.0909 219.4)",
+          "oklch(74% 0.0704 219.4)",
+          "oklch(85% 0.0440 219.4)",
+          "oklch(95% 0.0176 219.4)"
+        ]
+      },
+      "accent-deep": {
+        "role": "primary",
+        "displayName": "Darker Cyan",
+        "tonalRamp": [
+          "oklch(15% 0.0220 222.1)",
+          "oklch(26% 0.0485 222.1)",
+          "oklch(38% 0.0705 222.1)",
+          "oklch(50% 0.0881 222.1)",
+          "oklch(62% 0.0819 222.1)",
+          "oklch(74% 0.0634 222.1)",
+          "oklch(85% 0.0396 222.1)",
+          "oklch(95% 0.0159 222.1)"
+        ]
+      },
+      "signal": {
+        "role": "primary",
+        "displayName": "Signal Cyan",
+        "tonalRamp": [
+          "oklch(15% 0.0274 216.2)",
+          "oklch(26% 0.0604 216.2)",
+          "oklch(38% 0.0878 216.2)",
+          "oklch(50% 0.1097 216.2)",
+          "oklch(62% 0.1021 216.2)",
+          "oklch(74% 0.0790 216.2)",
+          "oklch(85% 0.0494 216.2)",
+          "oklch(95% 0.0198 216.2)"
+        ]
+      },
+      "selected": {
+        "role": "primary",
+        "displayName": "Pale Cyan",
+        "tonalRamp": [
+          "oklch(15% 0.0048 217.2)",
+          "oklch(26% 0.0105 217.2)",
+          "oklch(38% 0.0153 217.2)",
+          "oklch(50% 0.0192 217.2)",
+          "oklch(62% 0.0178 217.2)",
+          "oklch(74% 0.0138 217.2)",
+          "oklch(85% 0.0086 217.2)",
+          "oklch(95% 0.0034 217.2)"
+        ]
+      },
+      "success": {
+        "role": "secondary",
+        "displayName": "Success",
+        "tonalRamp": [
+          "oklch(15% 0.0249 166.0)",
+          "oklch(26% 0.0549 166.0)",
+          "oklch(38% 0.0798 166.0)",
+          "oklch(50% 0.0997 166.0)",
+          "oklch(62% 0.0928 166.0)",
+          "oklch(74% 0.0718 166.0)",
+          "oklch(85% 0.0449 166.0)",
+          "oklch(95% 0.0180 166.0)"
+        ]
+      },
+      "danger": {
+        "role": "secondary",
+        "displayName": "Danger",
+        "tonalRamp": [
+          "oklch(15% 0.0393 17.6)",
+          "oklch(26% 0.0865 17.6)",
+          "oklch(38% 0.1258 17.6)",
+          "oklch(50% 0.1572 17.6)",
+          "oklch(62% 0.1462 17.6)",
+          "oklch(74% 0.1132 17.6)",
+          "oklch(85% 0.0708 17.6)",
+          "oklch(95% 0.0283 17.6)"
+        ]
+      },
+      "danger-bg": {
+        "role": "secondary",
+        "displayName": "Pale Crimson",
+        "tonalRamp": [
+          "oklch(15% 0.0036 6.7)",
+          "oklch(26% 0.0079 6.7)",
+          "oklch(38% 0.0114 6.7)",
+          "oklch(50% 0.0143 6.7)",
+          "oklch(62% 0.0133 6.7)",
+          "oklch(74% 0.0103 6.7)",
+          "oklch(85% 0.0064 6.7)",
+          "oklch(95% 0.0026 6.7)"
+        ]
+      },
+      "navy": {
+        "role": "neutral",
+        "displayName": "Navy",
+        "tonalRamp": [
+          "oklch(15% 0.0129 250.0)",
+          "oklch(26% 0.0284 250.0)",
+          "oklch(38% 0.0413 250.0)",
+          "oklch(50% 0.0516 250.0)",
+          "oklch(62% 0.0480 250.0)",
+          "oklch(74% 0.0372 250.0)",
+          "oklch(85% 0.0232 250.0)",
+          "oklch(95% 0.0093 250.0)"
+        ]
+      },
+      "rail": {
+        "role": "neutral",
+        "displayName": "Rail Navy",
+        "tonalRamp": [
+          "oklch(15% 0.0129 249.0)",
+          "oklch(26% 0.0284 249.0)",
+          "oklch(38% 0.0413 249.0)",
+          "oklch(50% 0.0516 249.0)",
+          "oklch(62% 0.0480 249.0)",
+          "oklch(74% 0.0371 249.0)",
+          "oklch(85% 0.0232 249.0)",
+          "oklch(95% 0.0093 249.0)"
+        ]
+      },
+      "rail-ink": {
+        "role": "neutral",
+        "displayName": "Rail Ink",
+        "tonalRamp": [
+          "oklch(15% 0.0038 241.8)",
+          "oklch(26% 0.0083 241.8)",
+          "oklch(38% 0.0121 241.8)",
+          "oklch(50% 0.0151 241.8)",
+          "oklch(62% 0.0140 241.8)",
+          "oklch(74% 0.0109 241.8)",
+          "oklch(85% 0.0068 241.8)",
+          "oklch(95% 0.0027 241.8)"
+        ]
+      },
+      "rail-muted": {
+        "role": "neutral",
+        "displayName": "Rail Muted",
+        "tonalRamp": [
+          "oklch(15% 0.0082 243.8)",
+          "oklch(26% 0.0180 243.8)",
+          "oklch(38% 0.0262 243.8)",
+          "oklch(50% 0.0327 243.8)",
+          "oklch(62% 0.0304 243.8)",
+          "oklch(74% 0.0236 243.8)",
+          "oklch(85% 0.0147 243.8)",
+          "oklch(95% 0.0059 243.8)"
+        ]
+      },
+      "rail-rule": {
+        "role": "neutral",
+        "displayName": "Rail Rule",
+        "tonalRamp": [
+          "oklch(15% 0.0122 247.2)",
+          "oklch(26% 0.0267 247.2)",
+          "oklch(38% 0.0389 247.2)",
+          "oklch(50% 0.0486 247.2)",
+          "oklch(62% 0.0452 247.2)",
+          "oklch(74% 0.0350 247.2)",
+          "oklch(85% 0.0219 247.2)",
+          "oklch(95% 0.0087 247.2)"
+        ]
+      },
+      "page": {
+        "role": "neutral",
+        "displayName": "Cool White",
+        "tonalRamp": [
+          "oklch(15% 0.0010 236.5)",
+          "oklch(26% 0.0023 236.5)",
+          "oklch(38% 0.0033 236.5)",
+          "oklch(50% 0.0042 236.5)",
+          "oklch(62% 0.0039 236.5)",
+          "oklch(74% 0.0030 236.5)",
+          "oklch(85% 0.0019 236.5)",
+          "oklch(95% 0.0008 236.5)"
+        ]
+      },
+      "surface": {
+        "role": "neutral",
+        "displayName": "White",
+        "tonalRamp": [
+          "oklch(15% 0.0000 0.0)",
+          "oklch(26% 0.0000 0.0)",
+          "oklch(38% 0.0000 0.0)",
+          "oklch(50% 0.0000 0.0)",
+          "oklch(62% 0.0000 0.0)",
+          "oklch(74% 0.0000 0.0)",
+          "oklch(85% 0.0000 0.0)",
+          "oklch(95% 0.0000 0.0)"
+        ]
+      },
+      "surface-alt": {
+        "role": "neutral",
+        "displayName": "Pale Slate",
+        "tonalRamp": [
+          "oklch(15% 0.0015 239.8)",
+          "oklch(26% 0.0032 239.8)",
+          "oklch(38% 0.0047 239.8)",
+          "oklch(50% 0.0059 239.8)",
+          "oklch(62% 0.0055 239.8)",
+          "oklch(74% 0.0042 239.8)",
+          "oklch(85% 0.0026 239.8)",
+          "oklch(95% 0.0011 239.8)"
+        ]
+      },
+      "ink": {
+        "role": "neutral",
+        "displayName": "Ink",
+        "tonalRamp": [
+          "oklch(15% 0.0111 248.9)",
+          "oklch(26% 0.0245 248.9)",
+          "oklch(38% 0.0357 248.9)",
+          "oklch(50% 0.0446 248.9)",
+          "oklch(62% 0.0415 248.9)",
+          "oklch(74% 0.0321 248.9)",
+          "oklch(85% 0.0201 248.9)",
+          "oklch(95% 0.0080 248.9)"
+        ]
+      },
+      "muted": {
+        "role": "neutral",
+        "displayName": "Slate",
+        "tonalRamp": [
+          "oklch(15% 0.0097 240.5)",
+          "oklch(26% 0.0213 240.5)",
+          "oklch(38% 0.0309 240.5)",
+          "oklch(50% 0.0387 240.5)",
+          "oklch(62% 0.0360 240.5)",
+          "oklch(74% 0.0278 240.5)",
+          "oklch(85% 0.0174 240.5)",
+          "oklch(95% 0.0070 240.5)"
+        ]
+      },
+      "line": {
+        "role": "neutral",
+        "displayName": "Fine Rule",
+        "tonalRamp": [
+          "oklch(15% 0.0032 236.6)",
+          "oklch(26% 0.0070 236.6)",
+          "oklch(38% 0.0101 236.6)",
+          "oklch(50% 0.0127 236.6)",
+          "oklch(62% 0.0118 236.6)",
+          "oklch(74% 0.0091 236.6)",
+          "oklch(85% 0.0057 236.6)",
+          "oklch(95% 0.0023 236.6)"
+        ]
+      },
+      "line-strong": {
+        "role": "neutral",
+        "displayName": "Control Border",
+        "tonalRamp": [
+          "oklch(15% 0.0054 241.4)",
+          "oklch(26% 0.0119 241.4)",
+          "oklch(38% 0.0173 241.4)",
+          "oklch(50% 0.0216 241.4)",
+          "oklch(62% 0.0201 241.4)",
+          "oklch(74% 0.0155 241.4)",
+          "oklch(85% 0.0097 241.4)",
+          "oklch(95% 0.0039 241.4)"
+        ]
+      }
+    },
+    "typographyMeta": {
+      "display": {
+        "displayName": "Workspace heading",
+        "purpose": "Names the current workspace or location."
+      },
+      "mono": {
+        "displayName": "Literal value",
+        "purpose": "Keeps keys, identifiers, code, and raw responses legible."
+      }
+    },
+    "shadows": [
+      {
+        "name": "floating-menu",
+        "value": "0 7px 24px #142f4917",
+        "purpose": "Lifts a menu above the work area."
+      },
+      {
+        "name": "modal",
+        "value": "0 12px 35px #091d3b30",
+        "purpose": "Separates a modal dialog from the dimmed work area."
+      }
+    ],
+    "motion": [
+      {
+        "name": "refresh-spin",
+        "value": "spin .8s linear infinite",
+        "purpose": "Indicates a pending refresh. Reduced-motion mode disables rotation."
+      }
+    ],
+    "breakpoints": [
+      {
+        "name": "narrower-rail",
+        "value": "1210px"
+      },
+      {
+        "name": "compact-columns",
+        "value": "1020px"
+      },
+      {
+        "name": "full-width-inspector",
+        "value": "865px"
+      },
+      {
+        "name": "overlay-rail",
+        "value": "660px"
+      }
+    ]
+  },
+  "components": [
+    {
+      "name": "Primary action",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "Lead with the main action for the workspace.",
+      "html": "<button class=\"ds-button-primary\">Upload files</button>",
+      "css": ".ds-button-primary{display:inline-flex;align-items:center;justify-content:center;gap:7px;min-height:34px;padding:6px 11px;border:1px solid var(--line-strong);border-radius:var(--radius);background:var(--surface);color:var(--ink);font:620 12.5px/1.25 system-ui,sans-serif;cursor:pointer;white-space:nowrap;background:var(--accent);border-color:var(--accent);color:#fff}.ds-button-primary:hover:not(:disabled){background:var(--accent-deep);border-color:var(--accent-deep)}.ds-button-primary:active:not(:disabled){background:#085166}.ds-button-primary:focus-visible{outline:2px solid var(--accent);outline-offset:2px}.ds-button-primary:disabled{cursor:default;opacity:.54}"
+    },
+    {
+      "name": "Secondary action",
+      "kind": "button",
+      "refersTo": "button-secondary",
+      "description": "Offer an adjacent action with a bordered control.",
+      "html": "<button class=\"ds-button-secondary\">New folder</button>",
+      "css": ".ds-button-secondary{display:inline-flex;align-items:center;justify-content:center;gap:7px;min-height:34px;padding:6px 11px;border:1px solid var(--line-strong);border-radius:var(--radius);background:var(--surface);color:var(--ink);font:620 12.5px/1.25 system-ui,sans-serif;cursor:pointer;white-space:nowrap;}.ds-button-secondary:hover:not(:disabled){background:var(--surface-alt);border-color:#a4bac9}.ds-button-secondary:active:not(:disabled){background:var(--selected)}.ds-button-secondary:focus-visible{outline:2px solid var(--accent);outline-offset:2px}.ds-button-secondary:disabled{cursor:default;opacity:.54}"
+    },
+    {
+      "name": "Subtle action",
+      "kind": "button",
+      "refersTo": "button-subtle",
+      "description": "Expose a compact control without a resting border.",
+      "html": "<button class=\"ds-button-subtle\">Close</button>",
+      "css": ".ds-button-subtle{display:inline-flex;align-items:center;justify-content:center;gap:7px;min-height:34px;padding:6px 11px;border:1px solid var(--line-strong);border-radius:var(--radius);background:var(--surface);color:var(--ink);font:620 12.5px/1.25 system-ui,sans-serif;cursor:pointer;white-space:nowrap;border-color:transparent;background:transparent}.ds-button-subtle:hover:not(:disabled){background:var(--surface-alt)}.ds-button-subtle:active:not(:disabled){background:var(--selected)}.ds-button-subtle:focus-visible{outline:2px solid var(--accent);outline-offset:2px}.ds-button-subtle:disabled{cursor:default;opacity:.54}"
+    },
+    {
+      "name": "Destructive action",
+      "kind": "button",
+      "refersTo": "button-danger",
+      "description": "Confirm a destructive operation.",
+      "html": "<button class=\"ds-button-danger\">Delete bucket</button>",
+      "css": ".ds-button-danger{display:inline-flex;align-items:center;justify-content:center;gap:7px;min-height:34px;padding:6px 11px;border:1px solid var(--line-strong);border-radius:var(--radius);background:var(--surface);color:var(--ink);font:620 12.5px/1.25 system-ui,sans-serif;cursor:pointer;white-space:nowrap;background:var(--danger);border-color:var(--danger);color:#fff}.ds-button-danger:hover:not(:disabled){background:#8a2130;border-color:#8a2130}.ds-button-danger:active:not(:disabled){background:var(--selected)}.ds-button-danger:focus-visible{outline:2px solid var(--accent);outline-offset:2px}.ds-button-danger:disabled{cursor:default;opacity:.54}"
+    },
+    {
+      "name": "Outlined destructive action",
+      "kind": "button",
+      "refersTo": "button-danger-outline",
+      "description": "Mark a destructive entry point before confirmation.",
+      "html": "<button class=\"ds-button-danger-outline\">Delete objects</button>",
+      "css": ".ds-button-danger-outline{display:inline-flex;align-items:center;justify-content:center;gap:7px;min-height:34px;padding:6px 11px;border:1px solid var(--line-strong);border-radius:var(--radius);background:var(--surface);color:var(--ink);font:620 12.5px/1.25 system-ui,sans-serif;cursor:pointer;white-space:nowrap;color:var(--danger);border-color:#e1b8be}.ds-button-danger-outline:hover:not(:disabled){background:var(--danger-bg);border-color:#db99a4}.ds-button-danger-outline:active:not(:disabled){background:var(--selected)}.ds-button-danger-outline:focus-visible{outline:2px solid var(--accent);outline-offset:2px}.ds-button-danger-outline:disabled{cursor:default;opacity:.54}"
+    },
+    {
+      "name": "Text field",
+      "kind": "input",
+      "refersTo": "input-text",
+      "description": "Enter values in a standard form field.",
+      "html": "<input class=\"ds-text-field\" aria-label=\"Connection name\" placeholder=\"Connection name\">",
+      "css": ".ds-text-field{min-height:36px;padding:7px 10px;border:1px solid var(--line-strong);border-radius:var(--radius);background:var(--surface);color:var(--ink);caret-color:var(--accent);font:500 13px system-ui,sans-serif}.ds-text-field::placeholder{color:var(--muted);opacity:1}.ds-text-field:focus-visible{outline:2px solid var(--accent);outline-offset:2px}.ds-text-field:disabled{opacity:.65}"
+    },
+    {
+      "name": "Workspace navigation",
+      "kind": "nav",
+      "refersTo": "app-nav",
+      "description": "Underline the active destination in the workspace bar.",
+      "html": "<nav class=\"ds-nav\" aria-label=\"Workspace\"><button aria-current=\"page\">Objects</button><button>Tools</button><button>Activity</button></nav>",
+      "css": ".ds-nav{display:flex;gap:3px;height:59px;background:var(--surface);border-bottom:1px solid var(--line)}.ds-nav button{position:relative;padding:0 13px;background:transparent;border:0;color:var(--muted);font:640 13px system-ui,sans-serif;cursor:pointer}.ds-nav button:hover{background:var(--surface-alt)}.ds-nav button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}.ds-nav [aria-current]{color:var(--accent-deep)}.ds-nav [aria-current]::after{content:\"\";position:absolute;inset:auto 8px -1px;height:2px;background:var(--accent)}"
+    },
+    {
+      "name": "Storage class chip",
+      "kind": "chip",
+      "refersTo": "chip",
+      "description": "Identify a property value in compact space.",
+      "html": "<span class=\"ds-chip\">STANDARD</span>",
+      "css": ".ds-chip{display:inline-flex;align-items:center;min-height:21px;padding:1px 6px;border:1px solid var(--line);border-radius:4px;background:var(--surface-alt);color:var(--muted);font:690 10.5px system-ui,sans-serif;white-space:nowrap}"
+    },
+    {
+      "name": "Settings panel",
+      "kind": "card",
+      "refersTo": "settings-panel",
+      "description": "Group related settings in a ruled white surface.",
+      "html": "<section class=\"ds-settings\"><strong>Bucket settings</strong><div>Versioning</div><div>Lifecycle</div></section>",
+      "css": ".ds-settings{overflow:hidden;border:1px solid var(--line);border-radius:9px;background:var(--surface);color:var(--ink);font:14px/1.45 system-ui,sans-serif}.ds-settings strong{display:block;padding:14px 16px;font-weight:680}.ds-settings div{padding:11px 13px;border-top:1px solid var(--line)}"
+    },
+    {
+      "name": "Object register",
+      "kind": "custom",
+      "refersTo": "object-table",
+      "description": "Scan file properties and identify the item open in the inspector.",
+      "html": "<div class=\"ds-register\"><table><thead><tr><th>Name</th><th>Size</th></tr></thead><tbody><tr><td><button>downlink-manifest.json</button></td><td>6.9 KB</td></tr><tr aria-current=\"true\"><td><button>pass-018-summary.csv</button></td><td>348.2 KB</td></tr></tbody></table></div>",
+      "css": ".ds-register{overflow:auto;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);color:var(--ink);font:11.5px/1.45 system-ui,sans-serif;font-variant-numeric:tabular-nums}.ds-register table{width:100%;border-collapse:collapse;table-layout:fixed;text-align:left}.ds-register th{height:32px;padding:5px;background:#f0f4f7;color:var(--muted);font-size:11px;font-weight:650}.ds-register td{height:39px;padding:2px 5px;border-top:1px solid #e6edf1}.ds-register tr:has(td):hover{background:#f5f9fb}.ds-register tr[aria-current]{background:var(--selected)}.ds-register tr[aria-current] td:first-child{box-shadow:inset 1px 0 var(--accent)}.ds-register button{border:0;border-radius:4px;background:transparent;color:inherit;font:620 12px system-ui,sans-serif;cursor:pointer}.ds-register button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}"
+    }
+  ],
+  "narrative": {
+    "northStar": "Accession Register",
+    "overview": "The workspace pairs a deep navy connection rail with cool white work surfaces, using the European Space Agency palette as a reference. The supplied bucket-and-anvil mark anchors the brand.\n\nDense object lists and property rows are divided by fine rules. The active connection, current path, selected object, and operation results have distinct places so operators can verify what they are working on.",
+    "keyCharacteristics": [
+      "Navy connection rail and cyan interaction states",
+      "Task-focused tables and property lists",
+      "Flat work surfaces and restrained overlays"
+    ],
+    "rules": [],
+    "dos": [
+      "Do keep the selected endpoint and exact storage context visible near actions.",
+      "Do use fine dividers and cool surface changes to group data.",
+      "Do pair status colors with labels and preserve clear keyboard focus."
+    ],
+    "donts": [
+      "Don't use shadows to separate resting table rows or settings sections.",
+      "Don't use the saturated rail accent as body text on light surfaces."
+    ]
+  }
+}
