@@ -9,16 +9,22 @@ import WorkspaceTabs from '../../../components/shell/WorkspaceTabs.vue'
 import EmptyState from '../../../components/ui/EmptyState.vue'
 import FadeRegion from '../../../components/ui/FadeRegion.vue'
 import Notice from '../../../components/ui/Notice.vue'
+import BrowserWorkspace from '../../browser/components/BrowserWorkspace.vue'
 import { useBrowser } from '../../browser/store/browser'
 import BucketSettings from '../../bucket/components/BucketSettings.vue'
 import { providerNames, type Connection } from '../model/connection'
 
 const props = defineProps<{ profile: Connection; bucket?: string; filterBucket?: boolean; browseAvailable: boolean; demo: boolean; compact: boolean }>()
-const emit = defineEmits<{ inventory: []; inspect: [bucket: string]; browse: [bucket: string]; create: []; connections: []; tools: [bucket: string] }>()
+const emit = defineEmits<{ inventory: []; inspect: [bucket: string]; browse: [bucket: string]; create: []; connections: []; tools: [bucket: string]; job: [id: string] }>()
 const browser = useBrowser()
 const filter = ref('')
-const bucketTab = ref<'details' | 'configuration'>('details')
-const bucketTabs = [{ value: 'details', label: 'Details' }, { value: 'configuration', label: 'Configuration' }] as const
+const bucketTab = ref<'details' | 'configuration' | 'objects'>('details')
+const bucketTabs = computed(() => [
+  { value: 'details', label: 'Details' },
+  { value: 'configuration', label: 'Configuration' },
+  ...(props.browseAvailable ? [{ value: 'objects', label: 'Objects' } as const] : []),
+] as const)
+const embedded = computed(() => props.bucket ? { connection: props.profile.id, revision: props.profile.revision, bucket: props.bucket } : undefined)
 const shownBuckets = computed(() => browser.buckets.filter(bucket => props.filterBucket
   ? bucket.name === props.bucket
   : bucket.name === props.bucket || bucket.name.toLowerCase().includes(filter.value.trim().toLowerCase())))
@@ -84,6 +90,7 @@ async function bucketRemoved(): Promise<void> {
                 <button @click="emit('tools', bucket)">Open storage tools</button>
               </div>
             </div>
+            <BrowserWorkspace v-else-if="bucketTab === 'objects' && embedded" :embedded="embedded" :demo="demo" :compact="true" @job="emit('job', $event)" />
             <BucketSettings v-else :connection="profile.id" :bucket="bucket" :demo="demo" @removed="bucketRemoved" />
           </FadeRegion>
         </WorkspaceDrawer>

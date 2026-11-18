@@ -9,6 +9,7 @@ import FadeRegion from './components/ui/FadeRegion.vue'
 import Notice from './components/ui/Notice.vue'
 import AdminWorkspace from './features/administration/components/AdminWorkspace.vue'
 import BrowserWorkspace from './features/browser/components/BrowserWorkspace.vue'
+import type { Location } from './features/browser/model/objects'
 import { demoConnection } from './features/browser/model/demo'
 import { useBrowser } from './features/browser/store/browser'
 import NewBucketDialog from './features/bucket/components/NewBucketDialog.vue'
@@ -199,6 +200,11 @@ function openProfile(profile: Connection): void {
   navigation.go(defaultRoute(profile))
 }
 
+function openFavorite(location: Location): void {
+  const destination: WorkspaceRoute = { workspace: 'browser', connectionId: location.connection, bucket: location.bucket, prefix: location.prefix }
+  if (routeAllowed(destination)) navigation.go(destination)
+}
+
 function openBucket(bucket: string, prefix?: string): void {
   if (!canBrowse.value) return
   navigation.go({ workspace: 'browser', connectionId: connections.activeId, bucket: bucket || undefined, prefix: prefix || undefined })
@@ -284,7 +290,7 @@ function showJob(id: string): void {
         <FadeRegion>
           <KeepAlive include="BrowserWorkspace,ManagerWorkspace,MonitoringWorkspace,ActivityWorkspace,ToolsWorkspace" :max="12">
             <BrowserWorkspace v-if="route.workspace === 'browser'" key="browser" ref="browserView" :demo="demo" :compact="compact" @add="openEditor()"
-              @demo="openDemo" @create-bucket="creatingBucket = true" @tools="go({ workspace: 'manager', page: 'tools' })" @job="jobStarted" @navigate="openBucket" />
+              @demo="openDemo" @create-bucket="creatingBucket = true" @tools="go({ workspace: 'manager', page: 'tools' })" @job="jobStarted" @navigate="openBucket" @favorite="openFavorite" />
             <MonitoringWorkspace v-else-if="monitoringRoute" :key="`monitoring:${monitoringRoute.workspace}:${monitoringRoute.pane}:${connections.contextKey}`"
               :workspace="monitoringRoute.workspace" :pane="monitoringRoute.pane" :metric="monitoringRoute.metric"
               :profile="connections.active" :profiles="connections.profiles" :compact="compact"
@@ -292,7 +298,7 @@ function showJob(id: string): void {
             <ManagerWorkspace v-else-if="managerRoute?.page === 'buckets' && connections.active"
               :key="`manager:${connections.contextKey}`" :profile="connections.active" :bucket="managerRoute.bucket" :filter-bucket="managerRoute.filterBucket"
               :demo="demo" :browse-available="canBrowse" :compact="compact" @inventory="go({ workspace: 'manager', page: 'buckets' })"
-              @inspect="go({ workspace: 'manager', page: 'buckets', bucket: $event })" @browse="openBucket"
+              @inspect="go({ workspace: 'manager', page: 'buckets', bucket: $event })" @browse="openBucket" @job="jobStarted"
               @tools="go({ workspace: 'manager', page: 'tools', bucket: $event })" @create="creatingBucket = true" @connections="go({ workspace: 'admin', page: 'connections' })" />
             <AdminWorkspace v-else-if="route.workspace === 'cephAdmin' || managerRoute?.page === 'access'"
               :key="`access:${route.workspace}:${connections.contextKey}:${route.workspace === 'cephAdmin' ? route.group ?? '' : ''}:${route.workspace === 'cephAdmin' ? route.bucket ?? '' : ''}`" :scope="route.workspace === 'cephAdmin' ? 'ceph' : 's3'"

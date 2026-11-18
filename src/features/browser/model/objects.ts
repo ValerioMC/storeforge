@@ -17,6 +17,7 @@ export interface ObjectRow {
   modified: string | null
   storageClass: string | null
   etag: string | null
+  deleteMarker?: string
 }
 
 export interface ObjectPage {

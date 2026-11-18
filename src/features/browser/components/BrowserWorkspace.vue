@@ -1,7 +1,8 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, nextTick, onDeactivated, ref, watch } from 'vue'
 import { storeToRefs } from 'pinia'
-import { Archive, ArrowDownToLine, ArrowLeft, ChevronDown, ChevronRight, ClipboardPaste, Copy, Database, Ellipsis, Folder, FolderPlus, Layers3, ListFilter, RefreshCw, Scissors, Search, Settings2, Trash2, Upload, X } from 'lucide-vue-next'
+import { Archive, ArrowDownToLine, ArrowLeft, ArrowRight, ChevronRight, ClipboardPaste, Copy, Database, Ellipsis, Folder, FolderPlus, Layers3, ListFilter, RefreshCw, Scissors, Search, Settings2, Star, Trash2, Upload, X } from 'lucide-vue-next'
+import { errorMessage } from '../../../common/tauri'
 import { formatSize } from '../../../common/format'
 import ConfirmDialog from '../../../components/ui/ConfirmDialog.vue'
 import EmptyState from '../../../components/ui/EmptyState.vue'
@@ -11,20 +12,31 @@ import Notice from '../../../components/ui/Notice.vue'
 import BucketSettings from '../../bucket/components/BucketSettings.vue'
 import { workspaceAvailable } from '../../connection/model/workspace'
 import { useConnections } from '../../connection/store/connections'
+import { useWorkspaceNavigation } from '../../connection/store/workspace-navigation'
+import { readObjectPages } from '../api/listing'
 import { useObjectActions } from '../composables/useObjectActions'
-import { displayName, objectId, parentPrefix, type ObjectId, type ObjectRow, type Tag } from '../model/objects'
-import { useBrowser } from '../store/browser'
+import { folderPrefix, type SortColumn } from '../model/listing'
+import { objectId, parentPrefix, type Location, type ObjectId, type ObjectRow, type Tag } from '../model/objects'
+import { useBrowser, useEmbeddedBrowser } from '../store/browser'
+import BrowserFavorites from './BrowserFavorites.vue'
+import BrowserFolderTree from './BrowserFolderTree.vue'
+import BrowserListingOptions from './BrowserListingOptions.vue'
 import FolderDialog from './FolderDialog.vue'
 import ObjectInspector from './ObjectInspector.vue'
 import ObjectTable from './ObjectTable.vue'
 import TagEditor from './TagEditor.vue'
 import VersionList from './VersionList.vue'
 
-const props = defineProps<{ demo: boolean; compact: boolean }>()
-const emit = defineEmits<{ add: []; demo: []; createBucket: []; navigate: [bucket: string, prefix?: string]; tools: []; job: [id: string] }>()
-const browser = useBrowser()
+const props = defineProps<{ demo: boolean; compact: boolean; embedded?: { connection: string; revision?: string; bucket: string } }>()
+const emit = defineEmits<{ add: []; demo: []; createBucket: []; navigate: [bucket: string, prefix?: string]; favorite: [location: Location]; tools: []; job: [id: string] }>()
+const browser = props.embedded ? useEmbeddedBrowser() : useBrowser()
+const navigation = useWorkspaceNavigation()
+const embeddedHistory = ref([''])
+const historyIndex = ref(0)
+const canBack = computed(() => props.embedded ? historyIndex.value > 0 : navigation.canBack)
+const canForward = computed(() => props.embedded ? historyIndex.value < embeddedHistory.value.length - 1 : navigation.canForward)
 const connections = useConnections()
-const { tab, filter, technical } = storeToRefs(browser)
+const { tab, filter } = storeToRefs(browser)
 const folder = ref(false)
 const bulkTags = ref(false)
 const deleteItems = ref<ObjectId[]>([])
@@ -32,11 +44,19 @@ const pasteReview = ref(false)
 const pathDraft = ref('')
 const editPath = ref(false)
 const filterField = ref<HTMLInputElement>()
+const pathField = ref<HTMLInputElement>()
+const pathSuggestions = ref<string[]>([])
+const suggestionsError = ref('')
+const pathDetails = ref(false)
+const searchError = ref('')
 let restoreSearchFocus = false
 const { clipboard, failure, notice, run, enqueue, upload, download, archive, stage, paste } = useObjectActions(id => emit('job', id))
 
-const rows = computed(() => browser.rows.filter(row => displayName(row.key, browser.prefix).toLowerCase().includes(filter.value.toLowerCase())))
+const rows = computed(() => browser.rows)
 const listingLocation = computed(() => JSON.stringify([connections.contextKey, browser.bucket, browser.prefix]))
+const recents = computed(() => browser.recent.filter(location => location.connection === browser.location.connection &&
+  location.bucket === browser.bucket && location.prefix !== browser.prefix).map(location => location.prefix))
+const suggestedPaths = computed(() => [...new Set([...pathSuggestions.value, ...recents.value.filter(path => path.startsWith(pathDraft.value))])].slice(0, 8))
 const fileCount = computed(() => rows.value.filter(row => !row.folder).length)
 const folderCount = computed(() => rows.value.length - fileCount.value)
 const currentSize = computed(() => rows.value.reduce((sum, row) => sum + (row.size ?? 0), 0))
@@ -63,7 +83,27 @@ watch(() => connections.contextKey, () => {
   deleteItems.value = []
   pasteReview.value = false
 }, { flush: 'sync' })
-watch(() => browser.prefix, () => { editPath.value = false })
+watch(listingLocation, () => {
+  editPath.value = false
+  pathDetails.value = false
+  searchError.value = ''
+})
+watch(() => props.embedded, async (target, _, cleanup) => {
+  if (!target) return
+  let current = true
+  cleanup(() => { current = false })
+  historyIndex.value = 0
+  embeddedHistory.value = ['']
+  await browser.changeConnection(target.connection, target.revision)
+  if (current) await browser.navigate(target.bucket)
+}, { immediate: true })
+watch([pathDraft, editPath], ([draft, open], _, cleanup) => {
+  if (!open) return
+  let current = true
+  const timer = window.setTimeout(() => void suggestPrefixes(draft, () => current), 180)
+  cleanup(() => { current = false; window.clearTimeout(timer) })
+})
+onDeactivated(() => { editPath.value = false })
 watch(tab, value => { if (value !== 'Objects') browser.focus = null })
 
 defineExpose({
@@ -89,21 +129,80 @@ function restoreInspectorFocus(): void {
 
 function openRow(row: ObjectRow): void {
   if (row.folder) {
-    emit('navigate', browser.bucket, row.key)
+    navigate(browser.bucket, row.key)
   } else {
-    browser.focus = objectId(browser.bucket, row.key)
+    browser.focus = objectId(browser.bucket, row.key, row.deleteMarker ?? null)
   }
 }
 
-function jump(): void {
-  const path = !pathDraft.value || pathDraft.value.endsWith('/') ? pathDraft.value : `${pathDraft.value}/`
+function navigate(bucket: string, prefix = ''): void {
+  if (!props.embedded) {
+    emit('navigate', bucket, prefix)
+    return
+  }
+  if (prefix === browser.prefix) return
+  embeddedHistory.value = [...embeddedHistory.value.slice(0, historyIndex.value + 1), prefix]
+  historyIndex.value++
+  void browser.navigate(bucket, prefix)
+}
+
+function moveHistory(direction: -1 | 1): void {
+  if (!props.embedded) {
+    if (direction < 0) navigation.back()
+    else navigation.forward()
+    return
+  }
+  const index = historyIndex.value + direction
+  const path = embeddedHistory.value[index]
+  if (path === undefined) return
+  historyIndex.value = index
+  void browser.navigate(browser.bucket, path)
+}
+
+function jump(path = pathDraft.value): void {
   editPath.value = false
-  emit('navigate', browser.bucket, path)
+  navigate(browser.bucket, folderPrefix(path))
 }
 
 function beginPath(): void {
   pathDraft.value = browser.prefix
+  pathSuggestions.value = []
   editPath.value = true
+  void nextTick(() => pathField.value?.focus())
+}
+
+async function suggestPrefixes(draft: string, current: () => boolean): Promise<void> {
+  suggestionsError.value = ''
+  const parent = draft.slice(0, draft.lastIndexOf('/') + 1)
+  const matches: string[] = []
+  try {
+    for await (const rows of readObjectPages({ ...browser.location, prefix: parent }, false, current)) {
+      matches.push(...rows.filter(row => row.folder && row.key.startsWith(draft)).map(row => row.key))
+      if (matches.length >= 8) break
+    }
+    if (current()) pathSuggestions.value = matches.slice(0, 8)
+  } catch (failure) {
+    if (current()) suggestionsError.value = errorMessage(failure)
+  }
+}
+
+function applyListing(): void {
+  if (!Number.isInteger(browser.options.limit) || browser.options.limit < 1 || browser.options.limit > 5000) {
+    searchError.value = 'Enter a result limit between 1 and 5,000.'
+    return
+  }
+  searchError.value = ''
+  void browser.loadRows()
+}
+
+function clearFilter(): void {
+  filter.value = ''
+  applyListing()
+}
+
+function sortBy(column: SortColumn): void {
+  browser.sort = { column, ascending: browser.sort.column !== column || !browser.sort.ascending }
+  applyListing()
 }
 
 function beginDelete(objects: ObjectId[]): void {
@@ -131,13 +230,14 @@ async function setTags(tags: Tag[]): Promise<void> {
 }
 
 async function removeBucket(): Promise<void> {
-  emit('navigate', '')
+  navigate('')
   await browser.loadBuckets()
 }
 
 async function refresh(): Promise<void> {
+  browser.invalidateRowDetails()
   await browser.loadRows()
-  await browser.loadBuckets()
+  if (!props.embedded) await browser.loadBuckets()
 }
 
 async function acceptPaste(): Promise<void> {
@@ -146,7 +246,10 @@ async function acceptPaste(): Promise<void> {
 }
 
 function selectedStage(move: boolean): void {
-  stage(browser.location, browser.selectedObjects, move)
+  const source = browser.selectedObjects.every(object => object.key.startsWith(browser.prefix))
+    ? browser.location
+    : { ...browser.location, prefix: '' }
+  stage(source, browser.selectedObjects, move)
   browser.selected = []
 }
 
@@ -159,17 +262,19 @@ async function copyPath(): Promise<void> {
 </script>
 
 <template>
-  <div class="browser-host">
+  <div class="browser-host" :class="{ embedded }">
     <FadeRegion>
       <div v-if="browser.bucket" class="browser-layout">
         <section class="listing">
           <div class="listing-content">
             <header class="listing-header">
               <nav aria-label="Current S3 path" class="breadcrumbs">
-                <button class="crumb-root" :title="browser.bucket" @click="emit('navigate', browser.bucket)"><Database :size="15" />{{ browser.bucket }}</button>
+                <button class="icon-button" aria-label="Browser back" :disabled="!canBack" @click="moveHistory(-1)"><ArrowLeft :size="14" /></button>
+                <button class="icon-button" aria-label="Browser forward" :disabled="!canForward" @click="moveHistory(1)"><ArrowRight :size="14" /></button>
+                <button class="crumb-root" :title="browser.bucket" @click="navigate(browser.bucket)"><Database :size="15" />{{ browser.bucket }}</button>
                 <template v-for="part in tab === 'Settings' ? [] : pathParts" :key="part.path">
                   <ChevronRight :size="13" />
-                  <button :title="part.path" @click="emit('navigate', browser.bucket, part.path)">{{ part.name }}</button>
+                  <button :title="part.path" @click="navigate(browser.bucket, part.path)">{{ part.name }}</button>
                 </template>
               </nav>
               <div class="heading-line">
@@ -178,7 +283,7 @@ async function copyPath(): Promise<void> {
               </div>
             </header>
 
-            <nav class="workspace-tabs" aria-label="Bucket workspace">
+            <nav v-if="!embedded" class="workspace-tabs" aria-label="Bucket workspace">
               <button :class="{ active: tab === 'Objects' }" :aria-pressed="tab === 'Objects'" @click="tab = 'Objects'"><Folder :size="16" />Objects <span class="tab-count">{{ browser.rows.length }}</span></button>
               <button :class="{ active: tab === 'Versions' }" :aria-pressed="tab === 'Versions'" @click="tab = 'Versions'"><Layers3 :size="16" />Versions</button>
               <button :class="{ active: tab === 'Settings' }" :aria-pressed="tab === 'Settings'" @click="tab = 'Settings'"><Settings2 :size="16" />Bucket settings</button>
@@ -191,29 +296,57 @@ async function copyPath(): Promise<void> {
             <FadeRegion>
               <div v-if="tab === 'Objects'">
                 <div class="object-tools">
-                  <label class="object-search">
-                    <Search :size="17" /><input ref="filterField" v-model="filter" type="search" placeholder="Filter loaded objects…" aria-label="Filter loaded objects" /><kbd>Ctrl K</kbd>
-                  </label>
+                  <form class="object-search" role="search" @submit.prevent="applyListing">
+                    <Search :size="17" /><input ref="filterField" v-model="filter" type="search" placeholder="Search objects…" aria-label="Search objects" />
+                    <button class="subtle" type="submit">Search</button>
+                  </form>
                   <div class="object-tool-buttons">
-                    <button v-if="browser.prefix" class="icon-button" title="Parent folder" aria-label="Parent folder" @click="emit('navigate', browser.bucket, parentPrefix(browser.prefix))"><ArrowLeft :size="17" /></button>
+                    <button v-if="browser.prefix" class="icon-button" title="Parent folder" aria-label="Parent folder" @click="navigate(browser.bucket, parentPrefix(browser.prefix))"><ArrowLeft :size="17" /></button>
+                    <button class="button-label" @click="beginPath">Edit path</button>
+                    <button class="icon-button" title="Advanced listing" aria-label="Advanced listing" :aria-expanded="browser.advanced" @click="browser.advanced = !browser.advanced"><ListFilter :size="16" /></button>
+                    <button v-if="!embedded" class="icon-button" :aria-label="browser.isFavorite ? 'Remove current favorite' : 'Save current path as a favorite'" :aria-pressed="browser.isFavorite" @click="browser.toggleFavorite()"><Star :size="16" :fill="browser.isFavorite ? 'currentColor' : 'none'" /></button>
                     <button class="button-label" title="New folder" :disabled="readonly" @click="folder = true"><FolderPlus :size="17" /><span>New folder</span></button>
                     <button class="icon-button" aria-label="Refresh objects" title="Refresh objects" :disabled="browser.loading" @click="refresh"><RefreshCw :size="16" :class="{ spinning: browser.loading }" /></button>
                     <details class="tool-menu">
                       <summary class="icon-button" title="More list actions" aria-label="More list actions"><Ellipsis :size="18" /></summary>
                       <div class="pop-menu">
-                        <button @click="beginPath">Go to prefix</button>
                         <button @click="copyPath">Copy S3 path</button>
-                        <button @click="browser.recursive = !browser.recursive; browser.loadRows()">{{ browser.recursive ? 'Show folders' : 'List recursively' }}</button>
-                        <button @click="technical = !technical">{{ technical ? 'Hide storage class' : 'Show storage class' }}</button>
-                        <button :disabled="readonly || !managerAvailable" @click="emit('tools')">Prefix metrics and tools</button>
+                        <button @click="pathDetails = !pathDetails">{{ pathDetails ? 'Hide path details' : 'Show path details' }}</button>
+                        <button v-if="!embedded" :disabled="readonly || !managerAvailable" @click="emit('tools')">Prefix metrics and tools</button>
                       </div>
                     </details>
                   </div>
                 </div>
-                <form v-if="editPath" class="inline path-entry" @submit.prevent="jump">
-                  <label>Go to prefix<input v-model="pathDraft" placeholder="Path relative to bucket root" spellcheck="false" /></label>
-                  <button class="primary">Go</button><button type="button" class="icon-button" aria-label="Cancel prefix entry" @click="editPath = false"><X :size="17" /></button>
-                </form>
+                <div v-if="editPath" class="browser-path-editor">
+                  <form class="inline path-entry" @submit.prevent="jump()" @keydown.esc.stop="editPath = false">
+                    <label>Path from bucket root<input ref="pathField" v-model="pathDraft" spellcheck="false" autocomplete="off" /></label>
+                    <button class="primary">Go</button><button type="button" class="icon-button" aria-label="Cancel prefix entry" @click="editPath = false"><X :size="17" /></button>
+                  </form>
+                  <Notice v-if="suggestionsError" tone="error">{{ suggestionsError }}</Notice>
+                  <div v-if="suggestedPaths.length" class="path-choices" aria-label="Suggested paths">
+                    <button v-for="path in suggestedPaths" :key="path" class="subtle" @click="jump(path)"><code>{{ path || '/' }}</code></button>
+                  </div>
+                  <details v-if="recents.length"><summary>Recent paths</summary>
+                    <div class="path-choices"><button v-for="path in recents" :key="path" class="subtle" @click="jump(path)"><code>{{ path || '/' }}</code></button></div>
+                  </details>
+                </div>
+                <div class="browser-path-tools">
+                  <BrowserFolderTree :key="connections.contextKey" :connection="browser.location.connection" :bucket="browser.bucket" :prefix="browser.prefix" @navigate="navigate(browser.bucket, $event)" />
+                  <BrowserFavorites v-if="!embedded" :favorites="browser.favorites" @open="emit('favorite', $event)" @remove="browser.toggleFavorite($event)" />
+                </div>
+                <div v-if="pathDetails" class="browser-path-details">
+                  <dl>
+                    <div><dt>Bucket</dt><dd>{{ browser.bucket }}</dd></div>
+                    <div><dt>Literal prefix</dt><dd><code>{{ JSON.stringify(browser.prefix) }}</code></dd></div>
+                    <div><dt>Connection</dt><dd>{{ connections.active?.name }}</dd></div>
+                  </dl>
+                  <button :disabled="browser.prefixCount.status === 'loading'" @click="browser.loadPrefixCount()">Count recursively</button>
+                  <span v-if="browser.prefixCount.status === 'loading'" role="status">Reading all objects in the prefix…</span>
+                  <span v-else-if="browser.prefixCount.status === 'ready'" role="status">{{ browser.prefixCount.objects }} objects · {{ formatSize(browser.prefixCount.bytes) }}</span>
+                  <Notice v-else-if="browser.prefixCount.status === 'error'" tone="error">{{ browser.prefixCount.message }}</Notice>
+                </div>
+                <BrowserListingOptions :browser="browser" @apply="applyListing" @reset="clearFilter" />
+                <Notice v-if="searchError" tone="error">{{ searchError }}</Notice>
                 <div v-if="browser.selected.length || clipboard" class="selection-bar">
                   <span v-if="browser.selected.length"><ListFilter :size="15" /> {{ browser.selected.length }} selected</span>
                   <span v-else>{{ clipboard?.objects.length }} ready to {{ clipboard?.move ? 'move' : 'copy' }}</span>
@@ -234,11 +367,12 @@ async function copyPath(): Promise<void> {
                 <FadeRegion>
                   <div :key="listingLocation">
                     <Notice v-if="browser.error" tone="error">{{ browser.error }}</Notice>
-                    <p v-if="browser.loading && !browser.rows.length" class="loading-line" role="status">Loading objects…</p>
-                    <ObjectTable v-else-if="rows.length" :rows="rows" :technical="technical" :compact="compact" @open="openRow" @next="browser.loadRows(true)" />
-                    <EmptyState v-else-if="!browser.error" :icon="Folder" :title="filter ? 'No matching objects' : 'This prefix is empty'"
-                      :description="filter ? 'Clear the filter to see loaded objects.' : 'Create a folder or upload files to this location.'">
-                      <button v-if="filter" @click="filter = ''">Clear filter</button>
+                    <Notice v-if="browser.deletedError" tone="error">Deleted objects unavailable. {{ browser.deletedError }}</Notice>
+                    <p v-if="browser.loading" class="loading-line" role="status">Reading objects…</p>
+                    <ObjectTable v-if="rows.length" :browser="browser" :rows="rows" :compact="compact" @open="openRow" @next="browser.loadRows(true)" @sort="sortBy" />
+                    <EmptyState v-else-if="!browser.error && !browser.loading" :icon="Folder" :title="filter ? 'No matching objects' : 'This prefix is empty'"
+                      :description="filter ? 'Try another search or clear the search text.' : 'Create a folder or upload files to this location.'">
+                      <button v-if="filter" @click="clearFilter">Clear filter</button>
                       <button v-else-if="!readonly" class="primary" @click="upload(browser.location)"><Upload :size="16" />Upload files</button>
                     </EmptyState>
                     <button v-if="browser.cursor && !rows.length" class="load-more" :disabled="browser.loading" @click="browser.loadRows(true)">Search next page</button>
@@ -252,7 +386,7 @@ async function copyPath(): Promise<void> {
           </div>
           <footer v-if="tab === 'Objects'" class="listing-footer">
             <span>{{ fileCount }} {{ fileCount === 1 ? 'object' : 'objects' }}<span class="separator">·</span>{{ folderCount }} {{ folderCount === 1 ? 'folder' : 'folders' }}</span>
-            <span>{{ formatSize(currentSize) }} in view <span v-if="browser.cursor" class="separator">· More available</span></span>
+            <span>{{ formatSize(currentSize) }} in view <span v-if="browser.cursor" class="separator">· More available</span><span v-else-if="browser.limitReached" class="separator">· Result limit reached</span></span>
           </footer>
         </section>
         <FadeRegion @after-leave="restoreInspectorFocus">
@@ -264,13 +398,14 @@ async function copyPath(): Promise<void> {
         <div class="page-header"><div><h1>Object browser</h1><p>Browse and operate on S3 storage from your desktop.</p></div>
           <button v-if="browser.location.connection" title="Refresh buckets" :disabled="browser.bucketLoading" @click="browser.loadBuckets()"><RefreshCw :size="16" /> Refresh buckets</button>
         </div>
+        <BrowserFavorites v-if="!embedded" :favorites="browser.favorites" @open="emit('favorite', $event)" @remove="browser.toggleFavorite($event)" />
         <Notice v-if="browser.bucketError" tone="error">{{ browser.bucketError }}</Notice>
         <EmptyState v-if="!browser.location.connection" :icon="Database" title="Connect to your storage" description="Add an endpoint to browse its buckets and files.">
           <button class="primary" @click="emit('add')">Add connection</button><button @click="emit('demo')">Explore the demo</button>
         </EmptyState>
         <p v-else-if="browser.bucketLoading" class="loading-line" role="status">Loading buckets…</p>
         <div v-else-if="browser.buckets.length" class="settings-sheet">
-          <button v-for="bucket in browser.buckets" :key="bucket.name" class="settings-row bucket-card" @click="emit('navigate', bucket.name)">
+          <button v-for="bucket in browser.buckets" :key="bucket.name" class="settings-row bucket-card" @click="navigate(bucket.name)">
             <span class="file-icon"><Database :size="18" /></span><strong>{{ bucket.name }}</strong><ChevronRight :size="17" />
           </button>
         </div>
@@ -298,3 +433,20 @@ async function copyPath(): Promise<void> {
     </ConfirmDialog>
   </div>
 </template>
+
+<style scoped>
+.browser-host.embedded { height: min(650px, 68vh); }
+.browser-host.embedded .listing-content { padding: 10px; }
+.browser-host.embedded .listing-header { margin-bottom: 12px; }
+.browser-host.embedded .browser-layout { grid-template-columns: minmax(0, 1fr); }
+.browser-host.embedded .browser-layout:has(> .inspector) .listing { display: none; }
+.object-tools { flex-wrap: wrap; }
+.object-search { max-width: 380px; }
+.object-search button { min-height: 27px; }
+.browser-path-tools { display: grid; gap: 7px; margin-bottom: 10px; }
+.browser-path-editor, .browser-path-details { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 9px; margin-bottom: 10px; }
+.path-choices { display: flex; flex-wrap: wrap; gap: 4px; }
+.path-choices code, .browser-path-details code { white-space: pre-wrap; overflow-wrap: anywhere; }
+.browser-path-details dl { display: flex; flex-wrap: wrap; gap: 10px 18px; margin-bottom: 8px; }
+.browser-path-details span { margin-inline-start: 8px; }
+</style>
