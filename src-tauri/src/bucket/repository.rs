@@ -34,7 +34,7 @@ pub async fn configure(
             ));
         }
     };
-    SignedClient::new()?
+    SignedClient::for_connection(&session.profile)?
         .send(session, "s3", request(method, url, content_type, body)?)
         .await
 }

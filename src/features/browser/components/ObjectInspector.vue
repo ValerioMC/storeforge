@@ -3,6 +3,7 @@ import { computed, ref, watch } from 'vue'
 import { Clipboard, Download, Ellipsis, FileText, Link2, ShieldCheck, X } from 'lucide-vue-next'
 import { formatDate, formatSize } from '../../../common/format'
 import { errorMessage } from '../../../common/tauri'
+import FadeRegion from '../../../components/ui/FadeRegion.vue'
 import Notice from '../../../components/ui/Notice.vue'
 import { objectsApi } from '../api/objects'
 import type { ObjectChange, ObjectDetails, ObjectId, Tag } from '../model/objects'
@@ -31,6 +32,7 @@ const more = ref(false)
 let request = 0
 
 const name = computed(() => props.object.key.split('/').at(-1) || props.object.key)
+const inspectorView = computed(() => JSON.stringify([props.connection, props.object.bucket, props.object.key, props.object.versionId, tab.value]))
 const extension = computed(() => {
   const lastDot = name.value.lastIndexOf('.')
   return lastDot > 0 ? name.value.slice(lastDot + 1).slice(0, 10).toUpperCase() : 'OBJECT'
@@ -140,54 +142,62 @@ async function change(update: ObjectChange): Promise<void> {
       <button v-for="name in tabs" :key="name" :aria-pressed="tab === name" :class="{ active: tab === name }" @click="tab = name">{{ name }}</button>
     </nav>
     <div class="inspector-content">
-      <Notice v-if="error" tone="error">{{ error }}</Notice>
-      <Notice v-if="copied" tone="success">{{ copied }}</Notice>
-      <template v-if="tab === 'Details'">
-        <figure class="document-tile">
-          <div class="document-glyph"><FileText :size="38" :stroke-width="1.25" /></div>
-          <figcaption>{{ extension }}</figcaption>
-        </figure>
-        <h2 class="object-heading">{{ name }}</h2>
-        <p class="object-subtitle">{{ details?.contentType || (busy ? 'Reading object details…' : 'S3 object') }}</p>
-        <div class="panel-actions object-actions">
-          <button class="primary" :disabled="demo" title="Download object" @click="emit('download', object)"><Download :size="16" /> Download</button>
-          <button class="icon-button" title="Copy exact object key" aria-label="Copy exact object key" @click="copy(object.key, 'Object key copied.')"><Clipboard :size="16" /></button>
-          <button class="icon-button" title="More actions" aria-label="More object actions" :aria-expanded="more" @click="more = !more"><Ellipsis :size="18" /></button>
+      <FadeRegion>
+        <div :key="inspectorView">
+          <Notice v-if="error" tone="error">{{ error }}</Notice>
+          <Notice v-if="copied" tone="success">{{ copied }}</Notice>
+          <template v-if="tab === 'Details'">
+            <figure class="document-tile">
+              <div class="document-glyph"><FileText :size="38" :stroke-width="1.25" /></div>
+              <figcaption>{{ extension }}</figcaption>
+            </figure>
+            <h2 class="object-heading">{{ name }}</h2>
+            <p class="object-subtitle">{{ details?.contentType || (busy ? 'Reading object details…' : 'S3 object') }}</p>
+            <div class="panel-actions object-actions">
+              <button class="primary" :disabled="demo" title="Download object" @click="emit('download', object)"><Download :size="16" /> Download</button>
+              <button class="icon-button" title="Copy exact object key" aria-label="Copy exact object key" @click="copy(object.key, 'Object key copied.')"><Clipboard :size="16" /></button>
+              <button class="icon-button" title="More actions" aria-label="More object actions" :aria-expanded="more" @click="more = !more"><Ellipsis :size="18" /></button>
+            </div>
+            <FadeRegion>
+              <div v-if="more" class="panel-form object-more">
+                <label>Signed URL expiry (minutes)<input v-model.number="minutes" type="number" min="1" max="10080" :disabled="demo" /></label>
+                <button :disabled="demo" @click="generateUrl"><Link2 :size="16" /> Generate signed URL</button>
+                <label v-if="shareUrl">Signed URL<input :value="shareUrl" readonly @focus="($event.target as HTMLInputElement).select()" /></label>
+                <button v-if="shareUrl" @click="copy(shareUrl, 'Signed URL copied.')">Copy signed URL</button>
+                <button class="danger-outline" :disabled="demo" @click="emit('remove', object)">Delete object</button>
+              </div>
+            </FadeRegion>
+            <Notice v-if="detailsError" tone="error">{{ detailsError }}</Notice>
+            <dl class="object-properties">
+              <div><dt>Object key</dt><dd><code>{{ object.key }}</code></dd></div>
+              <div v-if="details" class="property-split"><section><dt>Size</dt><dd>{{ formatSize(details.size) }}</dd></section><section><dt>Storage class</dt><dd><span class="chip">{{ details.storageClass || 'STANDARD' }}</span></dd></section></div>
+              <div v-if="details"><dt>Last modified</dt><dd>{{ formatDate(details.modified, true) }}</dd></div>
+              <div v-if="details?.etag"><dt>ETag</dt><dd><code>{{ details.etag }}</code></dd></div>
+              <div v-if="details?.versionId"><dt>Version ID</dt><dd><code>{{ details.versionId }}</code></dd></div>
+              <div v-if="details?.encryption"><dt>Encryption</dt><dd class="inline"><ShieldCheck :size="16" /> {{ details.encryption }}</dd></div>
+              <div v-if="details?.retainUntil"><dt>Retain until</dt><dd>{{ formatDate(details.retainUntil, true) }}</dd></div>
+              <div v-if="details?.restore"><dt>Restore status</dt><dd>{{ details.restore }}</dd></div>
+            </dl>
+            <section v-if="details" class="metadata-section">
+              <div class="inline between"><h3>Metadata</h3><button v-if="!editing" class="subtle" :disabled="demo" @click="editMetadata">Edit</button></div>
+              <FadeRegion>
+                <form v-if="editing" class="panel-form" @submit.prevent="saveMetadata">
+                  <label>Content type<input v-model="contentType" /></label>
+                  <label>Cache control<input v-model="cacheControl" /></label>
+                  <label>User metadata JSON<textarea v-model="metadata" rows="6" spellcheck="false" /></label>
+                  <p class="muted">Saving replaces metadata on the current object and may create a new version.</p>
+                  <div class="panel-actions"><button type="button" @click="editing = false">Cancel</button><button class="primary">Save metadata</button></div>
+                </form>
+                <dl v-else class="metadata-list"><div v-for="(value, key) in details.metadata" :key="key"><dt>{{ key }}</dt><dd>{{ value }}</dd></div></dl>
+              </FadeRegion>
+            </section>
+          </template>
+          <ObjectPreview v-else-if="tab === 'Preview'" :connection="connection" :object="object" />
+          <VersionList v-else-if="tab === 'Versions'" :connection="connection" :bucket="object.bucket" :prefix="object.key" exact :demo="demo" @download="emit('download', $event)" @changed="emit('changed'); load()" />
+          <TagEditor v-else-if="tab === 'Tags'" :tags="tags" :disabled="demo" @save="saveTags" />
+          <ObjectAccess v-else-if="tab === 'Access'" :connection="connection" :object="object" :details="details" :demo="demo" @changed="load()" />
         </div>
-        <div v-if="more" class="panel-form object-more">
-          <label>Signed URL expiry (minutes)<input v-model.number="minutes" type="number" min="1" max="10080" :disabled="demo" /></label>
-          <button :disabled="demo" @click="generateUrl"><Link2 :size="16" /> Generate signed URL</button>
-          <label v-if="shareUrl">Signed URL<input :value="shareUrl" readonly @focus="($event.target as HTMLInputElement).select()" /></label>
-          <button v-if="shareUrl" @click="copy(shareUrl, 'Signed URL copied.')">Copy signed URL</button>
-          <button class="danger-outline" :disabled="demo" @click="emit('remove', object)">Delete object</button>
-        </div>
-        <Notice v-if="detailsError" tone="error">{{ detailsError }}</Notice>
-        <dl class="object-properties">
-          <div><dt>Object key</dt><dd><code>{{ object.key }}</code></dd></div>
-          <div v-if="details" class="property-split"><section><dt>Size</dt><dd>{{ formatSize(details.size) }}</dd></section><section><dt>Storage class</dt><dd><span class="chip">{{ details.storageClass || 'STANDARD' }}</span></dd></section></div>
-          <div v-if="details"><dt>Last modified</dt><dd>{{ formatDate(details.modified, true) }}</dd></div>
-          <div v-if="details?.etag"><dt>ETag</dt><dd><code>{{ details.etag }}</code></dd></div>
-          <div v-if="details?.versionId"><dt>Version ID</dt><dd><code>{{ details.versionId }}</code></dd></div>
-          <div v-if="details?.encryption"><dt>Encryption</dt><dd class="inline"><ShieldCheck :size="16" /> {{ details.encryption }}</dd></div>
-          <div v-if="details?.retainUntil"><dt>Retain until</dt><dd>{{ formatDate(details.retainUntil, true) }}</dd></div>
-          <div v-if="details?.restore"><dt>Restore status</dt><dd>{{ details.restore }}</dd></div>
-        </dl>
-        <section v-if="details" class="metadata-section">
-          <div class="inline between"><h3>Metadata</h3><button v-if="!editing" class="subtle" :disabled="demo" @click="editMetadata">Edit</button></div>
-          <form v-if="editing" class="panel-form" @submit.prevent="saveMetadata">
-            <label>Content type<input v-model="contentType" /></label>
-            <label>Cache control<input v-model="cacheControl" /></label>
-            <label>User metadata JSON<textarea v-model="metadata" rows="6" spellcheck="false" /></label>
-            <p class="muted">Saving replaces metadata on the current object and may create a new version.</p>
-            <div class="panel-actions"><button type="button" @click="editing = false">Cancel</button><button class="primary">Save metadata</button></div>
-          </form>
-          <dl v-else class="metadata-list"><div v-for="(value, key) in details.metadata" :key="key"><dt>{{ key }}</dt><dd>{{ value }}</dd></div></dl>
-        </section>
-      </template>
-      <ObjectPreview v-else-if="tab === 'Preview'" :connection="connection" :object="object" />
-      <VersionList v-else-if="tab === 'Versions'" :connection="connection" :bucket="object.bucket" :prefix="object.key" exact :demo="demo" @download="emit('download', $event)" @changed="emit('changed'); load()" />
-      <TagEditor v-else-if="tab === 'Tags'" :tags="tags" :disabled="demo" @save="saveTags" />
-      <ObjectAccess v-else-if="tab === 'Access'" :connection="connection" :object="object" :details="details" :demo="demo" @changed="load()" />
+      </FadeRegion>
     </div>
   </aside>
 </template>

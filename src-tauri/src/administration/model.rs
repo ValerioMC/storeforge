@@ -21,6 +21,7 @@ pub struct Field {
 pub struct Operation {
     pub id: String,
     pub label: String,
+    pub group: String,
     pub protocol: Protocol,
     pub action: String,
     pub method: Option<String>,

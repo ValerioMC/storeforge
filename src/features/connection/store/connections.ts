@@ -2,18 +2,26 @@ import { computed, ref } from 'vue'
 import { defineStore } from 'pinia'
 import { connectionsApi } from '../api/connections'
 import { demoConnection } from '../../browser/model/demo'
-import type { Connection, ConnectionDraft } from '../model/connection'
+import { executionContext, sameRealmEndpoints, type Connection, type ConnectionDraft } from '../model/connection'
 
 export const useConnections = defineStore('connections', () => {
   const profiles = ref<Connection[]>([])
   const activeId = ref('')
   const active = computed(() => activeId.value === 'demo' ? demoConnection : profiles.value.find(connection => connection.id === activeId.value))
 
+  const contextKey = computed(() => active.value ? JSON.stringify([active.value.id, active.value.revision]) : '')
+  const browserContext = computed(() => active.value && executionContext(active.value, 'browser'))
+  const realmEndpoints = computed(() => sameRealmEndpoints(active.value, profiles.value))
+
   async function load(): Promise<void> {
     profiles.value = await connectionsApi.list()
     const remembered = localStorage.getItem('storeforge.connection')
     const preferred = profiles.value.find(profile => profile.id === remembered)
-    activeId.value = preferred?.id ?? profiles.value[0]?.id ?? ''
+    activeId.value = preferred?.id ?? defaultProfileId()
+  }
+
+  function defaultProfileId(): string {
+    return profiles.value.find(profile => profile.settings?.defaultEndpoint)?.id ?? profiles.value[0]?.id ?? ''
   }
 
   function select(id: string): void {
@@ -31,8 +39,8 @@ export const useConnections = defineStore('connections', () => {
   async function remove(id: string): Promise<void> {
     await connectionsApi.remove(id)
     profiles.value = await connectionsApi.list()
-    if (activeId.value === id) select(profiles.value[0]?.id ?? '')
+    if (activeId.value === id) select(defaultProfileId())
   }
 
-  return { profiles, activeId, active, load, select, save, remove }
+  return { profiles, activeId, active, contextKey, browserContext, realmEndpoints, load, select, save, remove }
 })

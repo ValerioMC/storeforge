@@ -5,7 +5,7 @@ import EmptyState from '../../../components/ui/EmptyState.vue'
 import ConfirmDialog from '../../../components/ui/ConfirmDialog.vue'
 import Notice from '../../../components/ui/Notice.vue'
 import { errorMessage } from '../../../common/tauri'
-import { providerNames, type Connection } from '../model/connection'
+import { capabilityNames, identityCapability, providerNames, type Connection } from '../model/connection'
 import { useConnections } from '../store/connections'
 
 const emit = defineEmits<{ add: []; edit: [profile: Connection]; browse: [] }>()
@@ -45,8 +45,12 @@ async function removeProfile(): Promise<void> {
           <strong>{{ profile.name }}</strong>
           <p>{{ providerNames[profile.provider] }} · {{ profile.region }} · {{ profile.endpoint || 'AWS regional endpoint' }}</p>
         </div>
+        <span v-if="profile.settings?.defaultEndpoint" class="chip">Default</span>
+        <span v-for="tag in profile.settings?.standardTags" :key="'standard-' + tag" class="chip">{{ tag }}</span>
+        <span v-for="tag in profile.settings?.administrativeTags" :key="'admin-' + tag" class="chip" :title="'Administrative tag: ' + tag">{{ tag }}</span>
         <span v-if="profile.id === connections.activeId" class="chip chip-active">Active</span>
-        <button @click="useProfile(profile)">Browse buckets</button>
+        <button :disabled="['denied', 'unavailable'].includes(identityCapability(profile, 's3'))"
+          :title="capabilityNames[identityCapability(profile, 's3')]" @click="useProfile(profile)">Browse buckets</button>
         <button class="icon-button subtle" :aria-label="`Edit ${profile.name}`" @click="emit('edit', profile)"><Pencil :size="16" /></button>
         <button class="icon-button subtle" :aria-label="`Remove ${profile.name}`" @click="removing = profile"><Trash2 :size="16" /></button>
       </div>

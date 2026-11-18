@@ -4,6 +4,7 @@ import { Activity, Box, CircleHelp, FolderCog, List, PanelLeftClose, PanelLeftOp
 import { errorMessage, isTauri } from './common/tauri'
 import Sidebar from './components/shell/Sidebar.vue'
 import WindowControls from './components/shell/WindowControls.vue'
+import FadeRegion from './components/ui/FadeRegion.vue'
 import Notice from './components/ui/Notice.vue'
 import AdminWorkspace from './features/administration/components/AdminWorkspace.vue'
 import BrowserWorkspace from './features/browser/components/BrowserWorkspace.vue'
@@ -39,7 +40,10 @@ const dragRegion = windowChrome ? 'deep' : undefined
 let timer: number | undefined
 let previousRunning = new Set<string>()
 
-watch(() => connections.activeId, id => void browser.changeConnection(id))
+watch(() => connections.contextKey, () => {
+  creatingBucket.value = false
+  void browser.changeConnection(connections.browserContext?.connectionId ?? '')
+}, { flush: 'sync' })
 watch(compact, value => localStorage.setItem('storeforge.density', value ? 'compact' : 'comfortable'))
 watch(() => jobs.jobs, jobList => {
   const completed = jobList.some(job => previousRunning.has(job.id) && job.status !== 'running')
@@ -95,7 +99,6 @@ function openEditor(value?: Connection): void {
 function connectionSaved(): void {
   editor.value = false
   activePage.value = 'Objects'
-  if (profile.value?.id === connections.activeId) void browser.changeConnection(connections.activeId)
 }
 
 async function bucketCreated(name: string): Promise<void> {
@@ -144,14 +147,16 @@ function showJob(id: string): void {
       <Notice v-if="startError" tone="error">{{ startError }}</Notice>
 
       <div class="work-area">
-        <div v-show="activePage === 'Objects'" class="browser-host">
-          <BrowserWorkspace ref="browserView" :demo="demo" :compact="compact" @add="openEditor()" @demo="openDemo"
-            @create-bucket="creatingBucket = true" @tools="activePage = 'Tools'" @job="jobStarted" />
-        </div>
-        <ToolsWorkspace v-if="activePage === 'Tools'" :location="browser.location" :profiles="connections.profiles" :demo="demo" @job="showJob" />
-        <AdminWorkspace v-if="activePage === 'Administration'" :connection="connections.active" :bucket="browser.bucket" :demo="demo" />
-        <ActivityWorkspace v-if="activePage === 'Activity'" :demo="demo" :preselected="focusJob" @browse="activePage = 'Objects'" />
-        <ConnectionsWorkspace v-if="activePage === 'Connections'" @add="openEditor()" @edit="openEditor" @browse="activePage = 'Objects'" />
+        <FadeRegion>
+          <KeepAlive include="BrowserWorkspace">
+            <BrowserWorkspace v-if="activePage === 'Objects'" ref="browserView" :demo="demo" :compact="compact" @add="openEditor()" @demo="openDemo"
+              @create-bucket="creatingBucket = true" @tools="activePage = 'Tools'" @job="jobStarted" />
+            <ToolsWorkspace v-else-if="activePage === 'Tools'" :location="browser.location" :profiles="connections.profiles" :demo="demo" @job="showJob" />
+            <AdminWorkspace v-else-if="activePage === 'Administration'" :connection="connections.active" :bucket="browser.bucket" :demo="demo" />
+            <ActivityWorkspace v-else-if="activePage === 'Activity'" :demo="demo" :preselected="focusJob" @browse="activePage = 'Objects'" />
+            <ConnectionsWorkspace v-else @add="openEditor()" @edit="openEditor" @browse="activePage = 'Objects'" />
+          </KeepAlive>
+        </FadeRegion>
       </div>
       <footer class="app-status">
         <span><span class="status-dot" :class="{ online: demo || (connections.active && !browser.bucketError && !browser.bucketLoading) }" />
@@ -162,5 +167,5 @@ function showJob(id: string): void {
     </main>
   </div>
   <ConnectionEditor v-if="editor" :profile="profile" @close="editor = false" @saved="connectionSaved" />
-  <NewBucketDialog v-if="creatingBucket" :connection="connections.activeId" @close="creatingBucket = false" @created="bucketCreated" />
+  <NewBucketDialog v-if="creatingBucket" :connection="browser.location.connection" @close="creatingBucket = false" @created="bucketCreated" />
 </template>

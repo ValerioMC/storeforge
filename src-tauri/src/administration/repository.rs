@@ -45,7 +45,7 @@ async fn rgw(
         .unwrap_or("GET")
         .parse::<Method>()
         .map_err(|error| AppError::Invalid(error.to_string()))?;
-    SignedClient::new()?
+    SignedClient::for_connection(&session.profile)?
         .send(session, "s3", request(method, url, None, Vec::new())?)
         .await
 }
@@ -70,6 +70,7 @@ async fn query(
         form.finish().into_bytes()
     };
     let adjusted = Session {
+        context: session.context.clone(),
         profile: crate::connection::model::Connection {
             region,
             ..session.profile.clone()
@@ -83,7 +84,9 @@ async fn query(
         Some("application/x-www-form-urlencoded; charset=utf-8"),
         body,
     )?;
-    SignedClient::new()?.send(&adjusted, service, request).await
+    SignedClient::for_connection(&session.profile)?
+        .send(&adjusted, service, request)
+        .await
 }
 
 fn endpoint_for_query(session: &Session, protocol: Protocol) -> (String, String) {

@@ -5,10 +5,11 @@ import { errorMessage } from '../../../common/tauri'
 import AppSelect from '../../../components/ui/AppSelect.vue'
 import ConfirmDialog from '../../../components/ui/ConfirmDialog.vue'
 import EmptyState from '../../../components/ui/EmptyState.vue'
+import FadeRegion from '../../../components/ui/FadeRegion.vue'
 import Notice from '../../../components/ui/Notice.vue'
-import { providerNames, type Connection } from '../../connection/model/connection'
+import { identityAvailable, providerNames, type Connection, type IdentityKind } from '../../connection/model/connection'
 import { administer } from '../api/administration'
-import { operations } from '../model/operations'
+import { operations, type Operation } from '../model/operations'
 import AdminResponse from './AdminResponse.vue'
 
 const props = defineProps<{ connection?: Connection; bucket?: string; demo: boolean }>()
@@ -21,7 +22,7 @@ const response = ref<string>()
 const confirm = ref(false)
 let request = 0
 
-const available = computed(() => operations.filter(operation => operation.protocol !== 'rgw' || props.connection?.provider === 'ceph'))
+const available = computed(() => operations.filter(operation => props.demo || identityAvailable(props.connection, operationIdentity(operation))))
 const groups = computed(() => Array.from(new Set(available.value.map(operation => operation.group))))
 const groupOperations = computed(() => available.value.filter(operation => operation.group === group.value))
 const actionOptions = computed(() => groupOperations.value.map(({ id, label }) => ({ value: id, label })))
@@ -29,7 +30,7 @@ const operation = computed(() => groupOperations.value.find(item => item.id === 
 const sampleAvailable = computed(() => props.demo && operation.value?.id === 'ceph-buckets-inspect-bucket-statistics')
 const valid = computed(() => !!operation.value && operation.value.fields.every(field => !field.required || values.value[field.key]?.trim()))
 
-watch(() => props.connection?.id, () => {
+watch(() => [props.connection?.id, props.connection?.revision], () => {
   if (!groups.value.includes(group.value)) group.value = groups.value[0] ?? ''
   reset()
 })
@@ -38,6 +39,13 @@ watch(groupOperations, items => {
   selected.value = items[0]?.id ?? ''
 }, { immediate: true })
 watch(selected, reset, { immediate: true })
+
+function operationIdentity(operation: Operation): IdentityKind {
+  if (operation.protocol !== 'rgw') return 's3'
+  if (operation.group === 'Ceph accounts' || operation.group === 'Ceph users') return 'adminOps'
+  if (operation.group === 'Ceph monitoring') return 'supervision'
+  return 'cephAdmin'
+}
 
 function reset(): void {
   request++
@@ -90,7 +98,8 @@ async function execute(confirmed: boolean): Promise<void> {
     <EmptyState v-if="!connection" :icon="ShieldCheck" title="Select a connection" description="Administrative actions use the permissions of the selected connection." />
     <template v-else>
       <Notice v-if="demo">Preview the administration forms. Ceph buckets includes a sample statistics response.</Notice>
-      <div class="stage-panel admin-grid">
+      <Notice v-if="!groups.length">This profile has no available administration identity. Check its credentials in Connections.</Notice>
+      <div v-else class="stage-panel admin-grid">
         <nav class="settings-nav" aria-label="Administration sections">
           <button v-for="name in groups" :key="name" :class="{ active: name === group }" :aria-pressed="name === group" @click="group = name">
             <Server v-if="name.startsWith('Ceph')" :size="15" /><Bell v-else-if="name === 'Notifications'" :size="15" /><KeyRound v-else-if="name === 'Access keys'" :size="15" /><Fingerprint v-else :size="15" />{{ name }}
@@ -98,23 +107,31 @@ async function execute(confirmed: boolean): Promise<void> {
           </button>
         </nav>
         <div class="admin-body">
-          <form class="panel-form" @submit.prevent="review">
-            <div class="stage-heading">
-              <div><h2>{{ group }}</h2><p>{{ operation?.protocol === 'rgw' ? 'Manage the selected gateway using its RGW Admin Ops API.' : 'Manage resources within the selected account.' }}</p></div>
-              <span class="chip">{{ operation?.protocol.toUpperCase() }}</span>
+          <FadeRegion>
+            <div :key="group">
+              <form class="panel-form" @submit.prevent="review">
+                <div class="stage-heading">
+                  <div><h2>{{ group }}</h2><p>{{ operation?.protocol === 'rgw' ? 'Manage the selected gateway using its RGW Admin Ops API.' : 'Manage resources within the selected account.' }}</p></div>
+                  <span class="chip">{{ operation?.protocol.toUpperCase() }}</span>
+                </div>
+                <label>Action<AppSelect v-model="selected" :options="actionOptions" :disabled="busy" /></label>
+                <FadeRegion>
+                  <div :key="selected" class="panel-form">
+                    <div v-if="operation?.fields.length" class="form-grid">
+                      <label v-for="field in operation.fields" :key="field.key" :class="{ 'span-two': field.multiline }">
+                        {{ field.label }} <small v-if="!field.required">Optional</small>
+                        <textarea v-if="field.multiline" v-model="values[field.key]" :required="field.required" rows="7" spellcheck="false" />
+                        <input v-else v-model="values[field.key]" :required="field.required" spellcheck="false" />
+                      </label>
+                    </div>
+                    <Notice v-if="error" tone="error">{{ error }}</Notice>
+                    <div class="panel-actions"><button class="primary" :disabled="busy || !valid || (demo && !sampleAvailable)">{{ sampleAvailable ? 'Show sample response' : busy ? 'Waiting for endpoint…' : operation?.write ? 'Review change' : 'Run request' }}</button></div>
+                  </div>
+                </FadeRegion>
+              </form>
+              <AdminResponse v-if="response !== undefined" :key="request" :response="response" :demo="demo" />
             </div>
-            <label>Action<AppSelect v-model="selected" :options="actionOptions" :disabled="busy" /></label>
-            <div v-if="operation?.fields.length" class="form-grid">
-              <label v-for="field in operation.fields" :key="field.key" :class="{ 'span-two': field.multiline }">
-                {{ field.label }} <small v-if="!field.required">Optional</small>
-                <textarea v-if="field.multiline" v-model="values[field.key]" :required="field.required" rows="7" spellcheck="false" />
-                <input v-else v-model="values[field.key]" :required="field.required" spellcheck="false" />
-              </label>
-            </div>
-            <Notice v-if="error" tone="error">{{ error }}</Notice>
-            <div class="panel-actions"><button class="primary" :disabled="busy || !valid || (demo && !sampleAvailable)">{{ sampleAvailable ? 'Show sample response' : busy ? 'Waiting for endpoint…' : operation?.write ? 'Review change' : 'Run request' }}</button></div>
-          </form>
-          <AdminResponse v-if="response !== undefined" :key="request" :response="response" :demo="demo" />
+          </FadeRegion>
         </div>
       </div>
     </template>

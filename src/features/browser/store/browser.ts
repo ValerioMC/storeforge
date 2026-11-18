@@ -21,6 +21,7 @@ export const useBrowser = defineStore('browser', () => {
   const error = ref('')
   const bucketError = ref('')
   const recursive = ref(false)
+  let connectionRequest = 0
   let bucketRequest = 0
   let rowRequest = 0
 
@@ -42,16 +43,20 @@ export const useBrowser = defineStore('browser', () => {
   }
 
   async function changeConnection(id: string): Promise<void> {
+    const request = ++connectionRequest
+    bucketRequest++
     connection.value = id
     buckets.value = []
+    bucketLoading.value = Boolean(id)
+    bucketError.value = ''
     await navigate('', '')
-    if (connection.value !== id) return
+    if (request !== connectionRequest) return
     await loadBuckets(id)
-    if (connection.value !== id) return
+    if (request !== connectionRequest) return
     if (id === 'demo') {
       const demoBucket = demoBuckets[0]?.name ?? ''
       await navigate(demoBucket, demoPrefix)
-      if (connection.value === id) focus.value = objectId(demoBucket, demoKey)
+      if (request === connectionRequest) focus.value = objectId(demoBucket, demoKey)
     }
   }
 

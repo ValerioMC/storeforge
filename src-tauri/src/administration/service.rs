@@ -3,7 +3,10 @@ use std::collections::BTreeMap;
 use crate::{
     audit::service::AuditService,
     common::error::{AppError, Result},
-    connection::{model::Provider, service::Session},
+    connection::{
+        model::{IdentityKind, Provider, Workspace},
+        service::Session,
+    },
 };
 
 use super::{
@@ -23,19 +26,35 @@ impl AdministrationService {
         Ok(Self { operations })
     }
 
+    pub fn execution_identity(&self, id: &str) -> Result<(Workspace, IdentityKind)> {
+        let operation = self.operation(id)?;
+        if operation.protocol != Protocol::Rgw {
+            return Ok((Workspace::Manager, IdentityKind::S3));
+        }
+        let identity = match operation.group.as_str() {
+            "Ceph accounts" | "Ceph users" => IdentityKind::AdminOps,
+            "Ceph monitoring" => IdentityKind::Supervision,
+            _ => IdentityKind::CephAdmin,
+        };
+        Ok((Workspace::CephAdmin, identity))
+    }
+
+    fn operation(&self, id: &str) -> Result<&Operation> {
+        self.operations
+            .iter()
+            .find(|operation| operation.id == id)
+            .ok_or_else(|| {
+                AppError::Invalid("Select an available administration operation.".into())
+            })
+    }
+
     pub async fn execute(
         &self,
         session: &Session,
         request: AdminRequest,
         audit: &AuditService,
     ) -> Result<String> {
-        let operation = self
-            .operations
-            .iter()
-            .find(|operation| operation.id == request.operation)
-            .ok_or_else(|| {
-                AppError::Invalid("Select an available administration operation.".into())
-            })?;
+        let operation = self.operation(&request.operation)?;
         let values = validate_request(
             operation,
             request.values,
@@ -43,7 +62,7 @@ impl AdministrationService {
             session.profile.provider,
         )?;
         let result = repository::execute(session, operation, &values).await;
-        tracing::info!(operation = %operation.label, connection = %session.profile.id, success = result.is_ok(), "Administration request completed");
+        tracing::info!(operation = %operation.label, connection = %session.context.connection_id, principal = %session.context.principal_id, success = result.is_ok(), "Administration request completed");
         audit.record(session.profile.id, &operation.label, None, result)
     }
 }

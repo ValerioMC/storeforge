@@ -9,8 +9,8 @@ use crate::{
         service::BucketService,
     },
     connection::{
-        model::{Connection, Provider, Secret},
-        service::open_session,
+        model::{Connection, IdentityKind, Provider, Secret, Workspace},
+        service::{describe_context, open_session},
     },
     object::{
         model::{Location, ObjectChange, ObjectId, ObjectQuery, Tag},
@@ -39,6 +39,11 @@ async fn endpoint_object_lifecycle() {
         region: std::env::var("STOREFORGE_TEST_S3_REGION").unwrap_or_else(|_| "us-east-1".into()),
         path_style: true,
         known_buckets: Vec::new(),
+        endpoint_id: None,
+        revision: None,
+        settings: Default::default(),
+        services: Default::default(),
+        s3_capability: Default::default(),
     };
     let credentials = Secret {
         access_key: std::env::var("STOREFORGE_TEST_S3_ACCESS_KEY")
@@ -47,7 +52,8 @@ async fn endpoint_object_lifecycle() {
             .unwrap_or_else(|_| "testing".into()),
         session_token: None,
     };
-    let session = open_session(profile, credentials);
+    let context = describe_context(&profile, Workspace::Browser, IdentityKind::S3).unwrap();
+    let session = open_session(profile, context, credentials).unwrap();
     let bucket = format!("storeforge-test-{}", uuid::Uuid::new_v4().simple());
     BucketService::create(&session, &bucket, false)
         .await

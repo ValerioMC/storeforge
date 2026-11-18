@@ -8,20 +8,26 @@ use aws_sigv4::sign::v4;
 use reqwest::{Method, StatusCode, header};
 use url::Url;
 
-use crate::connection::service::Session;
+use crate::connection::{model::Connection, service::Session};
 
 use super::error::{AppError, Result};
 
 pub struct SignedClient(reqwest::Client);
 
 impl SignedClient {
-    pub fn new() -> Result<Self> {
-        let client = reqwest::Client::builder()
+    pub fn for_connection(profile: &Connection) -> Result<Self> {
+        let mut builder = reqwest::Client::builder()
             .redirect(reqwest::redirect::Policy::none())
-            .timeout(Duration::from_secs(45))
-            .build()
-            .map_err(transport_error)?;
-        Ok(Self(client))
+            .timeout(Duration::from_secs(45));
+        if !profile.settings.ca_certificate.trim().is_empty() {
+            let certificates =
+                reqwest::Certificate::from_pem_bundle(profile.settings.ca_certificate.as_bytes())
+                    .map_err(transport_error)?;
+            for certificate in certificates {
+                builder = builder.add_root_certificate(certificate);
+            }
+        }
+        Ok(Self(builder.build().map_err(transport_error)?))
     }
 
     pub async fn send(

@@ -6,6 +6,7 @@ import { errorMessage } from '../../../common/tauri'
 import AppSelect from '../../../components/ui/AppSelect.vue'
 import ConfirmDialog from '../../../components/ui/ConfirmDialog.vue'
 import EmptyState from '../../../components/ui/EmptyState.vue'
+import FadeRegion from '../../../components/ui/FadeRegion.vue'
 import Notice from '../../../components/ui/Notice.vue'
 import { bucketsApi } from '../../bucket/api/buckets'
 import type { Bucket } from '../../bucket/model/bucket'
@@ -164,61 +165,65 @@ async function abort(): Promise<void> {
         </button>
       </nav>
       <div class="stage-panel tools-panel">
-        <form class="panel-form" @submit.prevent="review">
-          <div class="stage-heading">
-            <div><h2>{{ tab }}</h2>
-              <p v-if="tab === 'Compare'">Compare relative keys, sizes, and ETags across two locations.</p>
-              <p v-else-if="tab === 'Migrate'">Copy all current objects under the source prefix to a destination.</p>
-              <p v-else-if="tab === 'Usage'">Count objects and bytes with an optional scan of versions and delete markers.</p>
-              <p v-else-if="tab === 'Integrity'">Check each listed key against the metadata currently returned by the endpoint.</p>
-              <p v-else-if="tab === 'Multipart'">Inspect and abort incomplete multipart uploads under this prefix.</p>
-              <p v-else>Delete current objects or permanently remove all versions under this prefix.</p>
+        <FadeRegion>
+          <div :key="tab">
+            <form class="panel-form" @submit.prevent="review">
+              <div class="stage-heading">
+                <div><h2>{{ tab }}</h2>
+                  <p v-if="tab === 'Compare'">Compare relative keys, sizes, and ETags across two locations.</p>
+                  <p v-else-if="tab === 'Migrate'">Copy all current objects under the source prefix to a destination.</p>
+                  <p v-else-if="tab === 'Usage'">Count objects and bytes with an optional scan of versions and delete markers.</p>
+                  <p v-else-if="tab === 'Integrity'">Check each listed key against the metadata currently returned by the endpoint.</p>
+                  <p v-else-if="tab === 'Multipart'">Inspect and abort incomplete multipart uploads under this prefix.</p>
+                  <p v-else>Delete current objects or permanently remove all versions under this prefix.</p>
+                </div>
+              </div>
+              <div v-if="needsTarget" class="form-grid">
+                <label>Destination connection<AppSelect v-model="targetId" :options="targetConnections" /></label>
+                <label>Destination bucket<AppSelect v-model="targetBucket" :options="targetBucketOptions" placeholder="Choose a bucket" required /></label>
+                <label class="span-two">Destination prefix <small>Optional</small><input v-model="targetPrefix" placeholder="e.g. telemetry/" spellcheck="false" /></label>
+              </div>
+              <label v-if="tab === 'Migrate'" class="check-label"><input v-model="overwrite" type="checkbox" /> Overwrite existing destination objects</label>
+              <label v-if="tab === 'Usage' || tab === 'Purge'" class="check-label"><input v-model="includeVersions" type="checkbox" /> Include all versions and delete markers</label>
+              <label v-if="tab === 'Purge' && !location.prefix && includeVersions" class="check-label"><input v-model="removeBucket" type="checkbox" /> Delete the bucket after emptying it</label>
+              <Notice v-if="error || (needsTarget && targetError)" tone="error">{{ error || targetError }}</Notice>
+              <Notice v-if="tab === 'Migrate' && targetBucket && overlap" tone="error">Choose a destination outside the source prefix.</Notice>
+              <div class="panel-actions"><button :class="tab === 'Purge' ? 'danger' : 'primary'" :disabled="demo || busy || (needsTarget && (!targetBucket || sameLocation || (tab === 'Migrate' && overlap)))">
+                {{ busy ? 'Working…' : tab === 'Purge' ? 'Review purge' : tab === 'Migrate' ? 'Review migration' : tab === 'Multipart' ? 'List uploads' : `Run ${tab.toLowerCase()} scan` }}
+              </button></div>
+            </form>
+
+            <div v-if="comparison" class="tool-results">
+              <dl class="result-totals">
+                <div><dt>Matching size and ETag</dt><dd>{{ comparison.matching }}</dd></div>
+                <div><dt>Different size</dt><dd>{{ comparison.changed }}</dd></div>
+                <div><dt>Different ETag</dt><dd>{{ comparison.differentEtag }}</dd></div>
+                <div><dt>Source only</dt><dd>{{ comparison.sourceOnly }}</dd></div>
+                <div><dt>Destination only</dt><dd>{{ comparison.targetOnly }}</dd></div>
+              </dl>
+              <p class="muted">Multipart and encrypted objects can have different ETags even when their contents match.</p>
+              <table v-if="comparison.differences.length" class="report-table">
+                <thead><tr><th>Relative key</th><th>Difference</th><th>Source</th><th>Destination</th></tr></thead>
+                <tbody><tr v-for="row in comparison.differences" :key="row.key"><td><code>{{ row.key }}</code></td><td>{{ differenceNames[row.difference] }}</td><td>{{ formatSize(row.sourceBytes) }}</td><td>{{ formatSize(row.targetBytes) }}</td></tr></tbody>
+              </table>
+            </div>
+            <dl v-if="usage" class="result-totals tool-results">
+              <div><dt>Current objects</dt><dd>{{ usage.objects }}</dd></div><div><dt>Current size</dt><dd>{{ formatSize(usage.bytes) }}</dd></div>
+              <div v-if="includeVersions"><dt>Object versions</dt><dd>{{ usage.versions }}</dd></div><div v-if="includeVersions"><dt>Delete markers</dt><dd>{{ usage.deleteMarkers }}</dd></div>
+            </dl>
+            <div v-if="integrity" class="tool-results">
+              <p>{{ integrity.checked }} objects checked · {{ integrity.failed }} failed</p>
+              <ul v-if="integrity.failures.length" class="failure-list"><li v-for="failure in integrity.failures" :key="failure.item"><code>{{ failure.item }}</code><span>{{ failure.message }}</span></li></ul>
+            </div>
+            <div v-if="multipart" class="tool-results">
+              <p v-if="!multipart.length" class="muted">No incomplete uploads.</p>
+              <div v-for="upload in multipart" :key="upload.uploadId" class="settings-row">
+                <div class="settings-description"><strong>{{ upload.key }}</strong><p>{{ formatDate(upload.initiated, true) }} · {{ upload.uploadId }}</p></div>
+                <button class="danger-outline" @click="aborting = upload">Abort upload</button>
+              </div>
             </div>
           </div>
-          <div v-if="needsTarget" class="form-grid">
-            <label>Destination connection<AppSelect v-model="targetId" :options="targetConnections" /></label>
-            <label>Destination bucket<AppSelect v-model="targetBucket" :options="targetBucketOptions" placeholder="Choose a bucket" required /></label>
-            <label class="span-two">Destination prefix <small>Optional</small><input v-model="targetPrefix" placeholder="e.g. telemetry/" spellcheck="false" /></label>
-          </div>
-          <label v-if="tab === 'Migrate'" class="check-label"><input v-model="overwrite" type="checkbox" /> Overwrite existing destination objects</label>
-          <label v-if="tab === 'Usage' || tab === 'Purge'" class="check-label"><input v-model="includeVersions" type="checkbox" /> Include all versions and delete markers</label>
-          <label v-if="tab === 'Purge' && !location.prefix && includeVersions" class="check-label"><input v-model="removeBucket" type="checkbox" /> Delete the bucket after emptying it</label>
-          <Notice v-if="error || (needsTarget && targetError)" tone="error">{{ error || targetError }}</Notice>
-          <Notice v-if="tab === 'Migrate' && targetBucket && overlap" tone="error">Choose a destination outside the source prefix.</Notice>
-          <div class="panel-actions"><button :class="tab === 'Purge' ? 'danger' : 'primary'" :disabled="demo || busy || (needsTarget && (!targetBucket || sameLocation || (tab === 'Migrate' && overlap)))">
-            {{ busy ? 'Working…' : tab === 'Purge' ? 'Review purge' : tab === 'Migrate' ? 'Review migration' : tab === 'Multipart' ? 'List uploads' : `Run ${tab.toLowerCase()} scan` }}
-          </button></div>
-        </form>
-
-        <div v-if="comparison" class="tool-results">
-          <dl class="result-totals">
-            <div><dt>Matching size and ETag</dt><dd>{{ comparison.matching }}</dd></div>
-            <div><dt>Different size</dt><dd>{{ comparison.changed }}</dd></div>
-            <div><dt>Different ETag</dt><dd>{{ comparison.differentEtag }}</dd></div>
-            <div><dt>Source only</dt><dd>{{ comparison.sourceOnly }}</dd></div>
-            <div><dt>Destination only</dt><dd>{{ comparison.targetOnly }}</dd></div>
-          </dl>
-          <p class="muted">Multipart and encrypted objects can have different ETags even when their contents match.</p>
-          <table v-if="comparison.differences.length" class="report-table">
-            <thead><tr><th>Relative key</th><th>Difference</th><th>Source</th><th>Destination</th></tr></thead>
-            <tbody><tr v-for="row in comparison.differences" :key="row.key"><td><code>{{ row.key }}</code></td><td>{{ differenceNames[row.difference] }}</td><td>{{ formatSize(row.sourceBytes) }}</td><td>{{ formatSize(row.targetBytes) }}</td></tr></tbody>
-          </table>
-        </div>
-        <dl v-if="usage" class="result-totals tool-results">
-          <div><dt>Current objects</dt><dd>{{ usage.objects }}</dd></div><div><dt>Current size</dt><dd>{{ formatSize(usage.bytes) }}</dd></div>
-          <div v-if="includeVersions"><dt>Object versions</dt><dd>{{ usage.versions }}</dd></div><div v-if="includeVersions"><dt>Delete markers</dt><dd>{{ usage.deleteMarkers }}</dd></div>
-        </dl>
-        <div v-if="integrity" class="tool-results">
-          <p>{{ integrity.checked }} objects checked · {{ integrity.failed }} failed</p>
-          <ul v-if="integrity.failures.length" class="failure-list"><li v-for="failure in integrity.failures" :key="failure.item"><code>{{ failure.item }}</code><span>{{ failure.message }}</span></li></ul>
-        </div>
-        <div v-if="multipart" class="tool-results">
-          <p v-if="!multipart.length" class="muted">No incomplete uploads.</p>
-          <div v-for="upload in multipart" :key="upload.uploadId" class="settings-row">
-            <div class="settings-description"><strong>{{ upload.key }}</strong><p>{{ formatDate(upload.initiated, true) }} · {{ upload.uploadId }}</p></div>
-            <button class="danger-outline" @click="aborting = upload">Abort upload</button>
-          </div>
-        </div>
+        </FadeRegion>
       </div>
     </template>
     <ConfirmDialog v-if="confirm" :title="confirm === 'Purge' ? 'Purge this location?' : 'Start migration?'"

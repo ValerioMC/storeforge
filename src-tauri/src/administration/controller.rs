@@ -17,7 +17,7 @@ pub async fn administer(
     connection: Uuid,
     request: AdminRequest,
 ) -> Result<String> {
-    service
-        .execute(&connections.session(connection)?, request, &audit)
-        .await
+    let (workspace, identity) = service.execution_identity(&request.operation)?;
+    let session = connections.session_for(connection, workspace, identity)?;
+    service.execute(&session, request, &audit).await
 }

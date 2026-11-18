@@ -3,6 +3,7 @@ import { computed, ref, shallowRef, watch } from 'vue'
 import { Braces, Database, Download, RefreshCw, Trash2, Upload } from 'lucide-vue-next'
 import { errorMessage, isMissing } from '../../../common/tauri'
 import ConfirmDialog from '../../../components/ui/ConfirmDialog.vue'
+import FadeRegion from '../../../components/ui/FadeRegion.vue'
 import Notice from '../../../components/ui/Notice.vue'
 import { bucketsApi } from '../api/buckets'
 import type { Configuration, ConfigurationChange } from '../model/bucket'
@@ -165,30 +166,32 @@ async function apply(): Promise<void> {
       <nav aria-label="Bucket settings" class="settings-nav">
         <button v-for="item in configurations" :key="item.id" :aria-pressed="configuration === item.id" :class="{ active: configuration === item.id }" @click="configuration = item.id">{{ item.label }}</button>
       </nav>
-      <div class="panel-form configuration-editor">
-        <div class="settings-toolbar">
-          <h3>{{ current.label }}</h3>
-          <div class="panel-actions">
-            <input ref="fileInput" type="file" hidden :accept="`.${current.format.toLowerCase()}`" @change="importFile" />
-            <button type="button" :disabled="busy || demo" @click="fileInput?.click()"><Upload :size="15" /> Import {{ current.format }}</button>
-            <button type="button" :disabled="busy || exporting || !document" @click="exportFile"><Download :size="15" /> Export {{ current.format }}</button>
-            <button class="icon-button" type="button" aria-label="Reload configuration" :disabled="busy" @click="load"><RefreshCw :size="17" /></button>
+      <FadeRegion>
+        <div :key="configuration" class="panel-form configuration-editor">
+          <div class="settings-toolbar">
+            <h3>{{ current.label }}</h3>
+            <div class="panel-actions">
+              <input ref="fileInput" type="file" hidden :accept="`.${current.format.toLowerCase()}`" @change="importFile" />
+              <button type="button" :disabled="busy || demo" @click="fileInput?.click()"><Upload :size="15" /> Import {{ current.format }}</button>
+              <button type="button" :disabled="busy || exporting || !document" @click="exportFile"><Download :size="15" /> Export {{ current.format }}</button>
+              <button class="icon-button" type="button" aria-label="Reload configuration" :disabled="busy" @click="load"><RefreshCw :size="17" /></button>
+            </div>
           </div>
+          <Notice v-if="error" tone="error">{{ error }}</Notice>
+          <Notice v-if="notice" :tone="notice.tone">{{ notice.text }}</Notice>
+          <p v-if="busy && !xml && !policy" class="muted" role="status">Reading endpoint configuration…</p>
+          <form class="panel-form" :aria-busy="busy" @submit.prevent="review">
+            <XmlSettingsForm v-if="schema && xml" :parent="xml.documentElement"
+              :fields="schema.fields" :revision="revision" :disabled="busy || demo" @change="updateXml" />
+            <PolicySettingsForm v-else-if="policy" :value="policy" scope="policy" :disabled="busy || demo" @change="updatePolicy" />
+            <div class="panel-actions configuration-actions">
+              <button v-if="current.example" type="button" :disabled="busy || demo" @click="loadExample"><Braces :size="15" /> Load example</button>
+              <button v-if="current.remove" type="button" :disabled="busy || demo || !original" @click="confirm = 'remove'">Remove setting</button>
+              <button class="primary" type="submit" :disabled="busy || demo || !document || document === original">Apply settings</button>
+            </div>
+          </form>
         </div>
-        <Notice v-if="error" tone="error">{{ error }}</Notice>
-        <Notice v-if="notice" :tone="notice.tone">{{ notice.text }}</Notice>
-        <p v-if="busy && !xml && !policy" class="muted" role="status">Reading endpoint configuration…</p>
-        <form class="panel-form" :aria-busy="busy" @submit.prevent="review">
-          <XmlSettingsForm v-if="schema && xml" :key="configuration" :parent="xml.documentElement"
-            :fields="schema.fields" :revision="revision" :disabled="busy || demo" @change="updateXml" />
-          <PolicySettingsForm v-else-if="policy" :value="policy" scope="policy" :disabled="busy || demo" @change="updatePolicy" />
-          <div class="panel-actions configuration-actions">
-            <button v-if="current.example" type="button" :disabled="busy || demo" @click="loadExample"><Braces :size="15" /> Load example</button>
-            <button v-if="current.remove" type="button" :disabled="busy || demo || !original" @click="confirm = 'remove'">Remove setting</button>
-            <button class="primary" type="submit" :disabled="busy || demo || !document || document === original">Apply settings</button>
-          </div>
-        </form>
-      </div>
+      </FadeRegion>
     </div>
     <div class="danger-zone"><div><h3>Delete empty bucket</h3><p>Remove the bucket after all objects and versions have been removed.</p></div>
       <button :disabled="demo || busy" class="danger-outline" @click="confirm = 'bucket'"><Trash2 :size="16" /> Delete bucket</button>

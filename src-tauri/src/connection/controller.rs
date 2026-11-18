@@ -3,10 +3,10 @@ use std::sync::Arc;
 use tauri::State;
 use uuid::Uuid;
 
-use crate::{bucket::service::BucketService, common::error::Result};
+use crate::common::error::Result;
 
 use super::{
-    model::{Connection, ConnectionDraft},
+    model::{Connection, ConnectionCheck, ConnectionDraft},
     service::ConnectionService,
 };
 
@@ -16,11 +16,11 @@ pub fn list_connections(service: State<'_, Arc<ConnectionService>>) -> Result<Ve
 }
 
 #[tauri::command]
-pub fn save_connection(
+pub async fn save_connection(
     service: State<'_, Arc<ConnectionService>>,
     draft: ConnectionDraft,
 ) -> Result<Connection> {
-    service.save(draft)
+    service.save(draft).await
 }
 
 #[tauri::command]
@@ -32,7 +32,6 @@ pub fn remove_connection(service: State<'_, Arc<ConnectionService>>, id: Uuid) -
 pub async fn test_connection(
     service: State<'_, Arc<ConnectionService>>,
     draft: ConnectionDraft,
-) -> Result<usize> {
-    let session = service.draft_session(draft)?;
-    Ok(BucketService::list(&session).await?.len())
+) -> Result<ConnectionCheck> {
+    service.check(draft).await
 }
