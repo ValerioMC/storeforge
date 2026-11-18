@@ -22,6 +22,7 @@ import { pausedSetup } from './features/connection/model/setup-draft'
 import { defaultRoute, routeTitle, workspaceAvailable, workspaceNames, type WorkspaceDestination, type WorkspaceRoute } from './features/connection/model/workspace'
 import { useConnections } from './features/connection/store/connections'
 import { useWorkspaceNavigation } from './features/connection/store/workspace-navigation'
+import MonitoringWorkspace from './features/monitoring/components/MonitoringWorkspace.vue'
 import ActivityWorkspace from './features/transfer/components/ActivityWorkspace.vue'
 import ToolsWorkspace from './features/transfer/components/ToolsWorkspace.vue'
 import { useJobs } from './features/transfer/store/jobs'
@@ -55,12 +56,24 @@ const canBrowse = computed(() => workspaceAvailable(connections.active, 'browser
 const canManage = computed(() => workspaceAvailable(connections.active, 'manager'))
 const managerProfiles = computed(() => connections.profiles.filter(profile => workspaceAvailable(profile, 'manager')))
 const managerRoute = computed(() => route.value.workspace === 'manager' ? route.value : undefined)
+const monitoringRoute = computed(() => {
+  const current = route.value
+  if (current.workspace === 'manager' && (current.page === 'overview' || current.page === 'metrics')) return { workspace: current.workspace, pane: current.page, metric: current.metric }
+  if (current.workspace === 'cephAdmin' && current.page !== 'resources') return { workspace: current.workspace, pane: current.page ?? 'overview', metric: current.metric }
+  if (current.workspace === 'admin' && (current.page === 'overview' || current.page === 'metrics' || current.page === 'health')) return { workspace: current.workspace, pane: current.page, metric: current.metric }
+  return undefined
+})
 const toolsLocation = computed(() => ({
   connection: browser.location.connection,
   bucket: managerRoute.value?.bucket ?? browser.bucket,
   prefix: managerRoute.value?.bucket ? (managerRoute.value.bucket === browser.bucket ? browser.prefix : '') : browser.prefix,
 }))
-const resource = computed(() => route.value.workspace === 'browser' ? route.value.prefix || route.value.bucket : managerRoute.value?.bucket)
+const resource = computed(() => {
+  const current = route.value
+  if (current.workspace === 'browser') return current.prefix || current.bucket
+  if (current.workspace === 'cephAdmin') return current.bucket
+  return managerRoute.value?.bucket
+})
 const windowChrome = (window as Window & { __storeforgeWindowChrome?: 'overlay' | 'custom' }).__storeforgeWindowChrome
 const dragRegion = windowChrome ? 'deep' : undefined
 let timer: number | undefined
@@ -162,10 +175,16 @@ function go(destination: WorkspaceDestination): void {
   navigation.go({ ...destination, connectionId: connections.activeId })
 }
 
+function openMonitoringDestination(destination: WorkspaceDestination, connectionId = connections.activeId): void {
+  const target = { ...destination, connectionId }
+  if (routeAllowed(target)) navigation.go(target)
+}
+
 function openWorkspaceRoot(): void {
   if (route.value.workspace === 'browser') openBucket('')
   else if (route.value.workspace === 'manager') go({ workspace: 'manager', page: 'overview' })
-  else if (route.value.workspace === 'admin') go({ workspace: 'admin', page: 'connections' })
+  else if (route.value.workspace === 'cephAdmin') go({ workspace: 'cephAdmin', page: 'overview' })
+  else if (route.value.workspace === 'admin') go({ workspace: 'admin', page: 'overview' })
 }
 
 function openDemo(): void {
@@ -248,7 +267,7 @@ function showJob(id: string): void {
           <WindowControls v-if="windowChrome === 'custom'" @error="startError = $event" />
         </header>
         <nav class="shell-breadcrumbs" aria-label="Workspace breadcrumb">
-          <button v-if="resource || route.workspace === 'manager' || (route.workspace === 'admin' && route.page !== 'connections')"
+          <button v-if="resource || route.workspace === 'manager' || route.workspace === 'admin' || route.workspace === 'cephAdmin'"
             type="button" class="subtle" @click="openWorkspaceRoot">{{ workspaceNames[route.workspace] }}</button>
           <span v-else :aria-current="routeTitle(route) === workspaceNames[route.workspace] ? 'page' : undefined">{{ workspaceNames[route.workspace] }}</span>
           <template v-if="routeTitle(route) !== workspaceNames[route.workspace]">
@@ -263,20 +282,25 @@ function showJob(id: string): void {
 
       <div class="work-area">
         <FadeRegion>
-          <KeepAlive include="BrowserWorkspace,ManagerWorkspace,ActivityWorkspace,ToolsWorkspace" :max="12">
+          <KeepAlive include="BrowserWorkspace,ManagerWorkspace,MonitoringWorkspace,ActivityWorkspace,ToolsWorkspace" :max="12">
             <BrowserWorkspace v-if="route.workspace === 'browser'" key="browser" ref="browserView" :demo="demo" :compact="compact" @add="openEditor()"
               @demo="openDemo" @create-bucket="creatingBucket = true" @tools="go({ workspace: 'manager', page: 'tools' })" @job="jobStarted" @navigate="openBucket" />
-            <ManagerWorkspace v-else-if="managerRoute && connections.active && (managerRoute.page === 'overview' || managerRoute.page === 'buckets')"
-              :key="`manager:${connections.contextKey}`" :profile="connections.active" :inventory="managerRoute.page === 'buckets'" :bucket="managerRoute.bucket"
+            <MonitoringWorkspace v-else-if="monitoringRoute" :key="`monitoring:${monitoringRoute.workspace}:${monitoringRoute.pane}:${connections.contextKey}`"
+              :workspace="monitoringRoute.workspace" :pane="monitoringRoute.pane" :metric="monitoringRoute.metric"
+              :profile="connections.active" :profiles="connections.profiles" :compact="compact"
+              @open="openMonitoringDestination" @create="creatingBucket = true" />
+            <ManagerWorkspace v-else-if="managerRoute?.page === 'buckets' && connections.active"
+              :key="`manager:${connections.contextKey}`" :profile="connections.active" :bucket="managerRoute.bucket" :filter-bucket="managerRoute.filterBucket"
               :demo="demo" :browse-available="canBrowse" :compact="compact" @inventory="go({ workspace: 'manager', page: 'buckets' })"
               @inspect="go({ workspace: 'manager', page: 'buckets', bucket: $event })" @browse="openBucket"
               @tools="go({ workspace: 'manager', page: 'tools', bucket: $event })" @create="creatingBucket = true" @connections="go({ workspace: 'admin', page: 'connections' })" />
             <AdminWorkspace v-else-if="route.workspace === 'cephAdmin' || managerRoute?.page === 'access'"
-              :key="`access:${route.workspace}:${connections.contextKey}`" :scope="route.workspace === 'cephAdmin' ? 'ceph' : 's3'"
-              :connection="connections.active" :bucket="browser.bucket" :demo="demo" />
+              :key="`access:${route.workspace}:${connections.contextKey}:${route.workspace === 'cephAdmin' ? route.group ?? '' : ''}:${route.workspace === 'cephAdmin' ? route.bucket ?? '' : ''}`" :scope="route.workspace === 'cephAdmin' ? 'ceph' : 's3'"
+              :connection="connections.active" :bucket="route.workspace === 'cephAdmin' ? route.bucket ?? browser.bucket : browser.bucket"
+              :initial-group="route.workspace === 'cephAdmin' ? route.group : undefined" :demo="demo" />
             <ToolsWorkspace v-else-if="managerRoute?.page === 'tools'" :key="`tools:${connections.contextKey}`" :location="toolsLocation"
               :profiles="managerProfiles" :source-buckets="browser.buckets" :demo="demo" @job="showJob" @source="go({ workspace: 'manager', page: 'tools', bucket: $event })" />
-            <ActivityWorkspace v-else-if="route.workspace === 'admin' && route.page === 'activity'" key="activity" :demo="demo" :preselected="route.jobId ?? null"
+            <ActivityWorkspace v-else-if="route.workspace === 'admin' && route.page === 'activity'" key="activity" :demo="demo" :preselected="route.jobId ?? null" :audit="route.audit"
               @browse="canBrowse ? go({ workspace: 'browser' }) : canManage ? go({ workspace: 'manager', page: 'buckets' }) : go({ workspace: 'admin', page: 'connections' })" />
             <WorkspacePreferences v-else-if="route.workspace === 'admin' && route.page === 'preferences'" v-model:compact="compact" v-model:show-tags="showTags"
               v-model:startup="startup" :profiles="connections.profiles" />

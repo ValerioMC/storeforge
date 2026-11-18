@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { Activity, ArrowDownToLine, ArrowUpFromLine, CircleStop, ClipboardList, MoveRight } from 'lucide-vue-next'
 import { formatDate } from '../../../common/format'
 import AuditHistory from '../../audit/components/AuditHistory.vue'
@@ -10,10 +10,11 @@ import Notice from '../../../components/ui/Notice.vue'
 import type { Job, JobStatus } from '../model/transfer'
 import { useJobs } from '../store/jobs'
 
-const props = defineProps<{ demo: boolean; preselected: string | null }>()
+const props = defineProps<{ demo: boolean; preselected: string | null; audit?: boolean }>()
 const emit = defineEmits<{ browse: [] }>()
 const store = useJobs()
 const view = ref<'Jobs' | 'Audit'>('Jobs')
+watch(() => props.audit, audit => { view.value = audit ? 'Audit' : 'Jobs' }, { immediate: true })
 const filter = ref<'all' | JobStatus>('all')
 const localError = ref('')
 

@@ -63,11 +63,14 @@ impl MonitoringService {
             Workspace::CephAdmin,
             IdentityKind::Supervision,
         );
-        let ((bucket_coverage, buckets), traffic) =
+        let ((bucket_coverage, buckets), (traffic, scoped_traffic)) =
             tokio::join!(collect_buckets(&profile, &listing, &quota, now), async {
                 match &supervision {
-                    Ok(session) => rgw::traffic(session, now).await,
-                    Err(reason) => reason.reading(),
+                    Ok(session) => tokio::join!(
+                        rgw::traffic(session, now, None),
+                        scoped_traffic(session, now)
+                    ),
+                    Err(reason) => (reason.reading(), reason.reading()),
                 }
             },);
         let sample = UsageSample {
@@ -82,6 +85,7 @@ impl MonitoringService {
             bucket_coverage,
             buckets,
             traffic,
+            scoped_traffic: Some(scoped_traffic),
         };
         connections.with_profile(id, |current| {
             ensure_scope(current, &scope)?;
@@ -98,8 +102,11 @@ impl MonitoringService {
     ) -> Result<MonitoringView> {
         let profile = connections.with_profile(id, |profile| Ok(profile.clone()))?;
         let scope = Scope::from(&profile);
-        let signed = (mode == CheckMode::Signed)
-            .then(|| connections.session_for(id, Workspace::Manager, IdentityKind::S3));
+        let signed = (mode == CheckMode::Signed).then(|| {
+            let session = connections.session_for(id, Workspace::Manager, IdentityKind::S3)?;
+            ensure_scope(&session.profile, &scope)?;
+            Ok(session)
+        });
         let result = health::probe(&profile, mode, signed).await;
         let now = Utc::now();
         connections.with_profile(id, |current| {
@@ -108,6 +115,29 @@ impl MonitoringService {
             self.repository.view(scope, now)
         })
     }
+}
+
+async fn scoped_traffic(
+    session: &Session,
+    now: DateTime<Utc>,
+) -> Reading<super::model::TrafficPeriod> {
+    let account = &session.context.account;
+    let tenant = &session.context.tenant;
+    if account.is_empty() {
+        return Reading::missing(
+            Coverage::Unavailable,
+            "Set the RGW account or user ID on this profile to read scoped traffic.",
+        );
+    }
+    let account_id = account.strip_prefix("RGW").is_some_and(|suffix| {
+        suffix.len() == 17 && suffix.bytes().all(|digit| digit.is_ascii_digit())
+    });
+    let uid = if account_id || tenant.is_empty() || account.starts_with(&format!("{tenant}$")) {
+        account.clone()
+    } else {
+        format!("{tenant}${account}")
+    };
+    rgw::traffic(session, now, Some(&uid)).await
 }
 
 fn ensure_scope(current: &Connection, expected: &Scope) -> Result<()> {
@@ -166,6 +196,10 @@ fn collection_session(
     }
     connections
         .session_for(profile.id, workspace, identity)
+        .and_then(|session| {
+            ensure_scope(&session.profile, &Scope::from(profile))?;
+            Ok(session)
+        })
         .map_err(|error| Ineligible {
             coverage: Coverage::Unavailable,
             message: error.to_string(),
@@ -178,17 +212,16 @@ async fn collect_buckets(
     quota: &std::result::Result<Session, Ineligible>,
     now: DateTime<Utc>,
 ) -> (Reading<u64>, Vec<BucketSample>) {
-    let session = match listing {
-        Ok(session) => session,
-        Err(reason) => return (reason.reading(), Vec::new()),
-    };
     let (coverage, mut names) = if profile.known_buckets.is_empty() {
-        match BucketService::list(session).await {
-            Ok(buckets) => (
-                Coverage::Complete,
-                buckets.into_iter().map(|bucket| bucket.name).collect(),
-            ),
-            Err(error) => return (reading_error(error), Vec::new()),
+        match listing {
+            Ok(session) => match BucketService::list(session).await {
+                Ok(buckets) => (
+                    Coverage::Complete,
+                    buckets.into_iter().map(|bucket| bucket.name).collect(),
+                ),
+                Err(error) => return (reading_error(error), Vec::new()),
+            },
+            Err(reason) => return (reason.reading(), Vec::new()),
         }
     } else {
         (Coverage::Partial, profile.known_buckets.clone())
@@ -202,13 +235,21 @@ async fn collect_buckets(
             bucket: bucket.clone(),
             prefix: String::new(),
         };
-        let (usage, (quota, rgw_storage)) =
-            tokio::join!(bucket_usage(&session.s3, &location, now), async {
+        let (usage, (quota, rgw_storage)) = tokio::join!(
+            async {
+                match listing {
+                    Ok(session) => bucket_usage(&session.s3, &location, now).await,
+                    Err(reason) => reason.reading(),
+                }
+            },
+            async {
                 match quota {
                     Ok(session) => rgw::bucket_info(session, &bucket).await,
                     Err(reason) => (reason.reading(), reason.reading()),
                 }
-            },);
+            }
+        );
+
         samples.push(BucketSample {
             bucket,
             collected_at: Utc::now(),

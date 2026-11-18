@@ -4,7 +4,6 @@ import { ArrowUpRight, ChevronRight, Database, Plus, RefreshCw } from 'lucide-vu
 import { formatDate } from '../../../common/format'
 import WorkspaceDrawer from '../../../components/shell/WorkspaceDrawer.vue'
 import WorkspaceHeader from '../../../components/shell/WorkspaceHeader.vue'
-import WorkspaceMetric from '../../../components/shell/WorkspaceMetric.vue'
 import WorkspacePanel from '../../../components/shell/WorkspacePanel.vue'
 import WorkspaceTabs from '../../../components/shell/WorkspaceTabs.vue'
 import EmptyState from '../../../components/ui/EmptyState.vue'
@@ -12,25 +11,17 @@ import FadeRegion from '../../../components/ui/FadeRegion.vue'
 import Notice from '../../../components/ui/Notice.vue'
 import { useBrowser } from '../../browser/store/browser'
 import BucketSettings from '../../bucket/components/BucketSettings.vue'
-import { capabilityNames, identityCapability, identityNames, providerNames, serviceIdentities, type Connection } from '../model/connection'
+import { providerNames, type Connection } from '../model/connection'
 
-const props = defineProps<{ profile: Connection; inventory: boolean; bucket?: string; browseAvailable: boolean; demo: boolean; compact: boolean }>()
+const props = defineProps<{ profile: Connection; bucket?: string; filterBucket?: boolean; browseAvailable: boolean; demo: boolean; compact: boolean }>()
 const emit = defineEmits<{ inventory: []; inspect: [bucket: string]; browse: [bucket: string]; create: []; connections: []; tools: [bucket: string] }>()
 const browser = useBrowser()
 const filter = ref('')
 const bucketTab = ref<'details' | 'configuration'>('details')
 const bucketTabs = [{ value: 'details', label: 'Details' }, { value: 'configuration', label: 'Configuration' }] as const
-const shownBuckets = computed(() => props.inventory ? browser.buckets.filter(bucket =>
-  bucket.name.toLowerCase().includes(filter.value.trim().toLowerCase())) : browser.buckets.slice(0, 6))
-const bucketCount = computed(() => browser.bucketLoading || browser.bucketError ? '—' : browser.buckets.length)
-const checkRows = computed(() => {
-  const applicable = props.profile.provider === 'ceph' ? serviceIdentities : ['runtime'] as const
-  return (['s3', ...applicable] as const).map(identity => ({
-    label: identityNames[identity],
-    state: props.demo ? (identity === 's3' ? 'detected' : 'unavailable') : identityCapability(props.profile, identity),
-  }))
-})
-const verifiedCount = computed(() => checkRows.value.filter(row => row.state === 'detected').length)
+const shownBuckets = computed(() => browser.buckets.filter(bucket => props.filterBucket
+  ? bucket.name === props.bucket
+  : bucket.name === props.bucket || bucket.name.toLowerCase().includes(filter.value.trim().toLowerCase())))
 const openBucket = computed(() => browser.buckets.find(bucket => bucket.name === props.bucket))
 
 watch(() => props.bucket, () => { bucketTab.value = 'details' })
@@ -43,7 +34,7 @@ async function bucketRemoved(): Promise<void> {
 
 <template>
   <section class="workspace-page manager-workspace" :class="{ 'workspace-compact': compact }">
-    <WorkspaceHeader :title="inventory ? 'Buckets' : 'Storage overview'"
+    <WorkspaceHeader title="Buckets"
       :description="`${providerNames[profile.provider]} · ${profile.region} · ${profile.endpoint || 'AWS regional endpoint'}`">
       <template #actions>
         <button :disabled="browser.bucketLoading" @click="browser.loadBuckets()"><RefreshCw :size="16" :class="{ spinning: browser.bucketLoading }" /> Refresh</button>
@@ -51,16 +42,11 @@ async function bucketRemoved(): Promise<void> {
       </template>
     </WorkspaceHeader>
 
-    <div v-if="!inventory" class="workspace-metrics">
-      <WorkspaceMetric title="Visible buckets" :value="bucketCount" :detail="profile.knownBuckets.length ? 'Restricted bucket list' : 'Bucket inventory'" @open="emit('inventory')" />
-      <WorkspaceMetric title="S3 credential" :value="capabilityNames[checkRows[0]?.state ?? 'unknown']" detail="Connection settings" @open="emit('connections')" />
-    </div>
-
-    <div class="manager-layout" :class="{ 'manager-overview': !inventory, 'manager-detail': !!bucket }">
-      <WorkspacePanel :title="inventory ? 'Bucket inventory' : 'Buckets'" :description="inventory ? profile.name : 'Visible to the selected S3 identity'">
+    <div class="manager-layout" :class="{ 'manager-detail': !!bucket }">
+      <WorkspacePanel title="Bucket inventory" :description="profile.name">
         <template #actions>
-          <label v-if="inventory" class="manager-filter"><span class="sr-only">Filter buckets</span><input v-model="filter" type="search" placeholder="Find a bucket" /></label>
-          <button v-else class="subtle" @click="emit('inventory')">View inventory <ArrowUpRight :size="15" /></button>
+          <button v-if="filterBucket" class="subtle" @click="emit('inventory')">All buckets</button>
+          <label v-else class="manager-filter"><span class="sr-only">Filter buckets</span><input v-model="filter" type="search" placeholder="Find a bucket" /></label>
         </template>
         <Notice v-if="browser.bucketError" tone="error">{{ browser.bucketError }}</Notice>
         <p v-else-if="browser.bucketLoading" class="workspace-panel-message" role="status">Reading buckets…</p>
@@ -83,15 +69,8 @@ async function bucketRemoved(): Promise<void> {
         </EmptyState>
       </WorkspacePanel>
 
-      <WorkspacePanel v-if="!inventory" title="Credential checks" :description="`${verifiedCount} of ${checkRows.length} verified`">
-        <template #chart><meter :value="verifiedCount" :max="checkRows.length" aria-label="Verified credential checks" /></template>
-        <dl class="workspace-check-list">
-          <div v-for="row in checkRows" :key="row.label"><dt>{{ row.label }}</dt><dd><span class="chip" :class="{ 'chip-active': row.state === 'detected' }">{{ capabilityNames[row.state] }}</span></dd></div>
-        </dl>
-      </WorkspacePanel>
-
       <FadeRegion>
-        <WorkspaceDrawer v-if="inventory && bucket" :key="bucket" :title="bucket" @close="emit('inventory')">
+        <WorkspaceDrawer v-if="bucket" :key="bucket" :title="bucket" @close="emit('inventory')">
           <WorkspaceTabs v-model="bucketTab" label="Bucket detail" :tabs="bucketTabs" />
           <FadeRegion>
             <div v-if="bucketTab === 'details'" class="workspace-drawer-content">

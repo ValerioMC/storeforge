@@ -99,7 +99,7 @@ impl Origin {
 #[serde(rename_all = "camelCase")]
 pub struct DistributionValue {
     pub objects: u64,
-    pub bytes: u64,
+    pub bytes: Option<u64>,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
@@ -168,6 +168,8 @@ pub struct UsageSample {
     pub bucket_coverage: Reading<u64>,
     pub buckets: Vec<BucketSample>,
     pub traffic: Reading<TrafficPeriod>,
+    #[serde(default)]
+    pub scoped_traffic: Option<Reading<TrafficPeriod>>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -177,6 +179,8 @@ pub struct UsagePoint {
     pub coverage: Coverage,
     pub current_bytes: Option<u64>,
     pub current_objects: Option<u64>,
+    #[serde(default)]
+    pub quota_usage: Option<f64>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]

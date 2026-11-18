@@ -143,9 +143,17 @@ impl UsageAccumulator {
 }
 
 fn add_bin(distribution: &mut BTreeMap<String, DistributionValue>, label: &str, size: Option<u64>) {
-    let bin = distribution.entry(label.into()).or_default();
+    let bin = distribution
+        .entry(label.into())
+        .or_insert(DistributionValue {
+            objects: 0,
+            bytes: Some(0),
+        });
     bin.objects = bin.objects.saturating_add(1);
-    bin.bytes = bin.bytes.saturating_add(size.unwrap_or_default());
+    bin.bytes = bin
+        .bytes
+        .zip(size)
+        .map(|(total, bytes)| total.saturating_add(bytes));
 }
 
 fn size_band(size: Option<u64>) -> &'static str {

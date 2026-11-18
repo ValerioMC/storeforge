@@ -6,7 +6,7 @@ import AppSelect from '../../../components/ui/AppSelect.vue'
 import Modal from '../../../components/ui/Modal.vue'
 import Notice from '../../../components/ui/Notice.vue'
 import { connectionsApi } from '../api/connections'
-import { capabilityNames, endpointSettings, identityNames, providerNames, serviceIdentities,
+import { capabilityNames, endpointSettings, identityNames, providerNames, serviceIdentities, validCoordinates,
   type Connection, type ConnectionCheck, type ConnectionDraft, type IdentityKind, type Provider,
   type ServiceDraft, type ServiceIdentityKind, type ProfileFields } from '../model/connection'
 import { discardSetup, pausedSetup, pauseSetup, setupStages, type SetupStage } from '../model/setup-draft'
@@ -32,6 +32,9 @@ const secretKey = ref('')
 const sessionToken = ref('')
 const reveal = ref(false)
 const settings = reactive({ ...endpointSettings(), ...initial?.settings })
+const latitude = ref<number | ''>(settings.coordinates?.latitude ?? '')
+const longitude = ref<number | ''>(settings.coordinates?.longitude ?? '')
+const coordinatesValid = computed(() => (latitude.value === '' && longitude.value === '') || validCoordinates(latitude.value, longitude.value))
 const standardTags = ref(settings.standardTags.join(', '))
 const administrativeTags = ref(settings.administrativeTags.join(', '))
 const reconciliations = reactive<Record<ServiceIdentityKind, ServiceDraft | null>>({
@@ -65,7 +68,7 @@ const addressingOptions = [
 ]
 const updatesCredentials = computed(() => !props.profile || Boolean(accessKey.value || secretKey.value || sessionToken.value))
 const validEndpoint = computed(() => Boolean(name.value.trim() && region.value.trim() &&
-  (endpoint.value.trim() || provider.value === 'aws')))
+  (endpoint.value.trim() || provider.value === 'aws') && coordinatesValid.value))
 const validCredentials = computed(() => (!updatesCredentials.value || Boolean(accessKey.value.trim() && secretKey.value.trim())) &&
   serviceIdentities.every(identity => {
     const change = reconciliations[identity]
@@ -78,7 +81,7 @@ watch(workspaceOptions, options => {
   if (!options.some(option => option.value === workspaceChoice.value)) workspaceChoice.value = ''
 })
 watch([name, provider, endpoint, region, pathStyle, known, accessKey, secretKey, sessionToken, settings,
-  standardTags, administrativeTags, reconciliations], () => { draftVersion++; result.value = undefined; error.value = '' }, { flush: 'sync' })
+  standardTags, administrativeTags, latitude, longitude, reconciliations], () => { draftVersion++; result.value = undefined; error.value = '' }, { flush: 'sync' })
 
 function labels(value: string): string[] {
   return [...new Set(value.split(/[,\n]/).map(tag => tag.trim()).filter(Boolean))]
@@ -88,7 +91,8 @@ function fields(): ProfileFields {
   return {
     name: name.value, provider: provider.value, endpoint: endpoint.value, region: region.value,
     pathStyle: pathStyle.value, knownBuckets: labels(known.value),
-    settings: { ...settings, standardTags: labels(standardTags.value), administrativeTags: labels(administrativeTags.value) },
+    settings: { ...settings, coordinates: typeof latitude.value === 'number' && typeof longitude.value === 'number'
+      ? { latitude: latitude.value, longitude: longitude.value } : null, standardTags: labels(standardTags.value), administrativeTags: labels(administrativeTags.value) },
   }
 }
 
@@ -176,6 +180,8 @@ async function importProfile(event: Event): Promise<void> {
     pathStyle.value = imported.pathStyle
     known.value = imported.knownBuckets.join('\n')
     Object.assign(settings, imported.settings)
+    latitude.value = settings.coordinates?.latitude ?? ''
+    longitude.value = settings.coordinates?.longitude ?? ''
     standardTags.value = settings.standardTags.join(', ')
     administrativeTags.value = settings.administrativeTags.join(', ')
   } catch (failure) {
@@ -210,11 +216,14 @@ async function importProfile(event: Event): Promise<void> {
             <label>Addressing<AppSelect v-model="pathStyle" :options="addressingOptions" /></label>
           </div>
           <details class="disclosure">
-            <summary>Tenant, realm and TLS</summary>
+            <summary>Tenant, realm, TLS and location</summary>
             <div class="form-grid">
               <label>Tenant<input v-model="settings.tenant" spellcheck="false" /></label>
               <label>Account<input v-model="settings.account" spellcheck="false" /></label>
               <label v-if="provider === 'ceph'">Ceph realm<input v-model="settings.realm" spellcheck="false" /></label>
+              <label>Latitude <small>Optional</small><input v-model.number="latitude" type="number" min="-90" max="90" step="any" aria-describedby="coordinates-help" /></label>
+              <label>Longitude <small>Optional</small><input v-model.number="longitude" type="number" min="-180" max="180" step="any" aria-describedby="coordinates-help" /></label>
+              <p id="coordinates-help" class="span-two">{{ coordinatesValid ? 'Provide both coordinates to pin this endpoint on the infrastructure map.' : 'Enter a latitude from −90 to 90 and a longitude from −180 to 180.' }}</p>
               <label class="span-two">Additional CA certificates <small>PEM</small><textarea v-model="settings.caCertificate" rows="3" spellcheck="false" /></label>
             </div>
           </details>

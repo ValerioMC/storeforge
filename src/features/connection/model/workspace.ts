@@ -2,23 +2,29 @@ import { demoBuckets, demoPrefix } from '../../browser/model/demo'
 import { executionContext, identityAvailable, type Connection } from './connection'
 
 export type DesktopWorkspace = 'browser' | 'manager' | 'cephAdmin' | 'admin'
-export type ManagerPage = 'overview' | 'buckets' | 'access' | 'tools'
-export type AdminPage = 'connections' | 'preferences' | 'activity'
+export type ManagerPage = 'overview' | 'buckets' | 'access' | 'tools' | 'metrics'
+export type CephPage = 'overview' | 'resources' | 'metrics' | 'health'
+export type AdminPage = 'overview' | 'connections' | 'preferences' | 'activity' | 'metrics' | 'health'
+export type MetricPage = 'usage' | 'history' | 'traffic' | 'cost'
+export type CephGroup = 'Ceph accounts' | 'Ceph users' | 'Ceph buckets'
 export type WorkspaceDestination =
   | { workspace: 'browser'; bucket?: string; prefix?: string }
-  | { workspace: 'manager'; page: ManagerPage; bucket?: string }
-  | { workspace: 'cephAdmin' }
-  | { workspace: 'admin'; page: AdminPage; jobId?: string }
+  | { workspace: 'manager'; page: ManagerPage; bucket?: string; filterBucket?: boolean; metric?: MetricPage }
+  | { workspace: 'cephAdmin'; page?: CephPage; metric?: MetricPage; group?: CephGroup; bucket?: string }
+  | { workspace: 'admin'; page: AdminPage; jobId?: string; audit?: boolean; metric?: MetricPage }
 export type WorkspaceRoute = WorkspaceDestination & { connectionId: string }
 
 export const workspaceNames: Record<DesktopWorkspace, string> = {
   browser: 'Browser', manager: 'Manager', cephAdmin: 'Ceph Admin', admin: 'Admin',
 }
 export const managerPages: Record<ManagerPage, string> = {
-  overview: 'Overview', buckets: 'Buckets', access: 'Access & topics', tools: 'Storage tools',
+  overview: 'Overview', metrics: 'Usage & metrics', buckets: 'Buckets', access: 'Access & topics', tools: 'Storage tools',
+}
+const cephPages: Record<CephPage, string> = {
+  overview: 'Overview', resources: 'RGW resources', metrics: 'Usage & metrics', health: 'Endpoint health',
 }
 export const adminPages: Record<AdminPage, string> = {
-  connections: 'Connections', preferences: 'Preferences', activity: 'Activity',
+  overview: 'Overview', metrics: 'Usage & metrics', health: 'Endpoint health', connections: 'Connections', preferences: 'Preferences', activity: 'Activity',
 }
 
 export function workspaceAvailable(profile: Connection | undefined, workspace: DesktopWorkspace): boolean {
@@ -39,7 +45,7 @@ export function defaultRoute(profile?: Connection): WorkspaceRoute {
   const preferred = profile?.settings?.defaultWorkspace
   if (preferred === 'manager' && workspaceAvailable(profile, 'manager')) return { workspace: 'manager', connectionId, page: 'overview' }
   if (preferred === 'cephAdmin' && workspaceAvailable(profile, 'cephAdmin')) return { workspace: 'cephAdmin', connectionId }
-  if (preferred === 'admin') return { workspace: 'admin', connectionId, page: 'connections' }
+  if (preferred === 'admin') return { workspace: 'admin', connectionId, page: 'overview' }
   if (workspaceAvailable(profile, 'browser')) return { workspace: 'browser', connectionId }
   if (workspaceAvailable(profile, 'manager')) return { workspace: 'manager', connectionId, page: 'overview' }
   if (workspaceAvailable(profile, 'cephAdmin')) return { workspace: 'cephAdmin', connectionId }
@@ -49,18 +55,23 @@ export function defaultRoute(profile?: Connection): WorkspaceRoute {
 export function routeTitle(route: WorkspaceRoute): string {
   if (route.workspace === 'admin') return adminPages[route.page]
   if (route.workspace === 'manager') return managerPages[route.page]
+  if (route.workspace === 'cephAdmin') return cephPages[route.page ?? 'overview']
   return workspaceNames[route.workspace]
 }
 
 export function isWorkspaceRoute(value: unknown): value is WorkspaceRoute {
   if (!value || typeof value !== 'object' || !('connectionId' in value) || typeof value.connectionId !== 'string' ||
     !('workspace' in value)) return false
-  if (value.workspace === 'cephAdmin') return true
+  if ('metric' in value && value.metric !== 'usage' && value.metric !== 'history' && value.metric !== 'traffic' && value.metric !== 'cost') return false
+  if (value.workspace === 'cephAdmin') {
+    return (!('page' in value) || typeof value.page === 'string' && Object.hasOwn(cephPages, value.page)) &&
+      (!('group' in value) || value.group === 'Ceph accounts' || value.group === 'Ceph users' || value.group === 'Ceph buckets') && hasOptionalString(value, 'bucket')
+  }
   if (value.workspace === 'browser') return hasOptionalString(value, 'bucket') && hasOptionalString(value, 'prefix')
   if (!('page' in value) || typeof value.page !== 'string') return false
-  if (value.workspace === 'admin') return Object.hasOwn(adminPages, value.page) && hasOptionalString(value, 'jobId')
+  if (value.workspace === 'admin') return Object.hasOwn(adminPages, value.page) && hasOptionalString(value, 'jobId') && (!('audit' in value) || typeof value.audit === 'boolean')
   return value.workspace === 'manager' && Object.hasOwn(managerPages, value.page) &&
-    hasOptionalString(value, 'bucket')
+    hasOptionalString(value, 'bucket') && (!('filterBucket' in value) || typeof value.filterBucket === 'boolean')
 }
 
 function hasOptionalString(value: object, key: 'bucket' | 'prefix' | 'jobId'): boolean {

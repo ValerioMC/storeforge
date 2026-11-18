@@ -364,6 +364,13 @@ fn validate_profile(
     settings.account = settings.account.trim().into();
     settings.realm = settings.realm.trim().into();
     validate_ca(&settings.ca_certificate)?;
+    if settings.coordinates.is_some_and(|point| {
+        !(-90.0..=90.0).contains(&point.latitude) || !(-180.0..=180.0).contains(&point.longitude)
+    }) {
+        return Err(AppError::Invalid(
+            "Enter latitude from −90 to 90 and longitude from −180 to 180.".into(),
+        ));
+    }
     let id = draft.id.unwrap_or_else(Uuid::new_v4);
     let same_endpoint = |profile: &Connection| {
         profile.provider == draft.provider

@@ -18,6 +18,7 @@ struct UsageDocument {
 
 #[derive(Deserialize)]
 struct UsageOwner {
+    user: Option<String>,
     total: Option<UsageTotals>,
 }
 
@@ -49,17 +50,24 @@ struct StorageCategory {
     num_objects: u64,
 }
 
-pub async fn traffic(session: &Session, now: DateTime<Utc>) -> Reading<TrafficPeriod> {
+pub async fn traffic(
+    session: &Session,
+    now: DateTime<Utc>,
+    owner: Option<&str>,
+) -> Reading<TrafficPeriod> {
     let end = DateTime::from_timestamp(now.timestamp().div_euclid(3600) * 3600, 0).unwrap_or(now);
     let start = end - TimeDelta::hours(24);
-    let filters = [
+    let mut filters = vec![
         ("start", start.format("%Y-%m-%d %H:%M:%S").to_string()),
         ("end", end.format("%Y-%m-%d %H:%M:%S").to_string()),
         ("show-entries", "false".into()),
         ("show-summary", "true".into()),
     ];
+    if let Some(owner) = owner {
+        filters.push(("uid", owner.into()));
+    }
     match rgw_request(session, Method::GET, "usage", filters).await {
-        Ok(document) => traffic_totals(&document, start, end),
+        Ok(document) => traffic_totals(&document, start, end, owner),
         Err(error) => reading_error(error),
     }
 }
@@ -68,9 +76,10 @@ fn traffic_totals(
     document: &str,
     start: DateTime<Utc>,
     end: DateTime<Utc>,
+    owner: Option<&str>,
 ) -> Reading<TrafficPeriod> {
     let Ok(UsageDocument {
-        summary: Some(owners),
+        summary: Some(mut owners),
     }) = serde_json::from_str(document)
     else {
         return Reading::missing(
@@ -78,6 +87,9 @@ fn traffic_totals(
             "The gateway did not report traffic totals.",
         );
     };
+    if let Some(owner) = owner {
+        owners.retain(|entry| entry.user.as_deref() == Some(owner));
+    }
     if owners.is_empty() {
         return Reading::missing(
             Coverage::Missing,

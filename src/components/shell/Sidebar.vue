@@ -17,12 +17,14 @@ const favorites = ref<string[]>(loadFavorites())
 const storageLinks = [
   { label: 'Browser', icon: Box, destination: { workspace: 'browser' } },
   { label: 'Overview', icon: LayoutDashboard, destination: { workspace: 'manager', page: 'overview' } },
+  { label: 'Usage & metrics', icon: Activity, destination: { workspace: 'manager', page: 'metrics' } },
   { label: 'Bucket inventory', icon: Database, destination: { workspace: 'manager', page: 'buckets' } },
   { label: 'Storage tools', icon: FolderCog, destination: { workspace: 'manager', page: 'tools' } },
 ] as const
 const adminLinks = [
   { label: 'Access & topics', icon: KeyRound, destination: { workspace: 'manager', page: 'access' } },
   { label: 'Ceph Admin', icon: ShieldCheck, destination: { workspace: 'cephAdmin' } },
+  { label: 'Admin overview', icon: LayoutDashboard, destination: { workspace: 'admin', page: 'overview' } },
   { label: 'Connections', icon: Cable, destination: { workspace: 'admin', page: 'connections' } },
   { label: 'Activity', icon: Activity, destination: { workspace: 'admin', page: 'activity' } },
   { label: 'Preferences', icon: Settings2, destination: { workspace: 'admin', page: 'preferences' } },

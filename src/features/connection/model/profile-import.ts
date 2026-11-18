@@ -1,4 +1,4 @@
-import { endpointSettings, type ProfileFields, type Provider } from './connection'
+import { endpointSettings, validCoordinates, type ProfileFields, type Provider } from './connection'
 
 export function parseProfile(source: string): ProfileFields {
   const input: unknown = JSON.parse(source)
@@ -26,6 +26,12 @@ export function parseProfile(source: string): ProfileFields {
       const value = values[key]
       if (isStringList(value)) settings[key] = value
       else if (value !== undefined) throw new Error('Invalid profile tags.')
+    }
+    const coordinates = values.coordinates
+    if (coordinates != null) {
+      if (!isRecord(coordinates) || !validCoordinates(coordinates.latitude, coordinates.longitude) ||
+        typeof coordinates.latitude !== 'number' || typeof coordinates.longitude !== 'number') throw new Error('Invalid endpoint coordinates.')
+      settings.coordinates = { latitude: coordinates.latitude, longitude: coordinates.longitude }
     }
     const preferred = values.defaultWorkspace
     if (preferred === 'browser' || preferred === 'manager' || preferred === 'cephAdmin' || preferred === 'admin') {

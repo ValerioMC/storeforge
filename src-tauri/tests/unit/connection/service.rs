@@ -272,3 +272,23 @@ fn execution_context_rejects_invalid_ca_and_private_key_input() {
     assert!(validate_ca("-----BEGIN PRIVATE KEY-----").is_err());
     assert!(validate_ca("").is_ok());
 }
+
+#[test]
+fn workspace_dashboards_validates_coordinates_and_retains_zero() {
+    use crate::connection::model::EndpointCoordinates;
+
+    let mut draft = draft_for("https://storage.example.test", "research", "key");
+    let origin = EndpointCoordinates {
+        latitude: 0.0,
+        longitude: 0.0,
+    };
+    draft.settings.as_mut().unwrap().coordinates = Some(origin);
+    let profile = validate_profile(&draft, None, &[]).unwrap();
+    assert!(profile.settings.coordinates == Some(origin));
+
+    draft.settings.as_mut().unwrap().coordinates = Some(EndpointCoordinates {
+        latitude: 90.01,
+        longitude: 0.0,
+    });
+    assert!(validate_profile(&draft, None, &[]).is_err());
+}

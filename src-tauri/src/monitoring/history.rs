@@ -39,7 +39,27 @@ pub fn point(sample: &UsageSample) -> UsagePoint {
         coverage,
         current_bytes,
         current_objects,
+        quota_usage: quota_usage(sample),
     }
+}
+
+fn quota_usage(sample: &UsageSample) -> Option<f64> {
+    if sample.bucket_coverage.coverage != Coverage::Complete {
+        return None;
+    }
+    let (used, limit) =
+        sample
+            .buckets
+            .iter()
+            .try_fold((0_u64, 0_u64), |(used, limit), bucket| {
+                let quota = bucket.quota.value.as_ref().filter(|quota| quota.enabled)?;
+                let storage = bucket.rgw_storage.value.as_ref()?;
+                Some((
+                    used.checked_add(storage.bytes)?,
+                    limit.checked_add(quota.max_bytes?)?,
+                ))
+            })?;
+    (limit != 0).then(|| used as f64 / limit as f64)
 }
 
 fn sum_measured(values: impl Iterator<Item = Option<u64>>, sample: &UsageSample) -> Option<u64> {

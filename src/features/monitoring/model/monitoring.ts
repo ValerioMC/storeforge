@@ -24,7 +24,7 @@ export interface Reading<T> {
   detail: string | null
 }
 
-export type Distribution = Record<string, { objects: number; bytes: number }>
+export type Distribution = Record<string, { objects: number; bytes: number | null }>
 
 export interface BucketUsage {
   currentBytes: number | null
@@ -65,6 +65,7 @@ export interface UsageSample {
   bucketCoverage: Reading<number>
   buckets: BucketSample[]
   traffic: Reading<TrafficPeriod>
+  scopedTraffic?: Reading<TrafficPeriod> | null
 }
 
 export interface UsagePoint {
@@ -72,6 +73,7 @@ export interface UsagePoint {
   coverage: Coverage
   currentBytes: number | null
   currentObjects: number | null
+  quotaUsage?: number | null
 }
 
 export interface HistorySlot {

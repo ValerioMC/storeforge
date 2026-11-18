@@ -4,6 +4,11 @@ export type IdentityKind = 's3' | ServiceIdentityKind
 export type CapabilityState = 'detected' | 'unavailable' | 'denied' | 'unknown'
 export type Workspace = 'browser' | 'manager' | 'cephAdmin' | 'storageOps' | 'admin' | 'portal'
 
+export interface EndpointCoordinates {
+  latitude: number
+  longitude: number
+}
+
 export interface EndpointSettings {
   tenant: string
   account: string
@@ -15,6 +20,7 @@ export interface EndpointSettings {
   browserEnabled: boolean
   managerEnabled: boolean
   defaultWorkspace: Workspace | null
+  coordinates?: EndpointCoordinates | null
 }
 
 export interface ServiceIdentity {
@@ -102,7 +108,7 @@ export const capabilityNames: Record<CapabilityState, string> = {
 export function endpointSettings(): EndpointSettings {
   return {
     tenant: '', account: '', realm: '', defaultEndpoint: false, standardTags: [], administrativeTags: [], caCertificate: '',
-    browserEnabled: true, managerEnabled: true, defaultWorkspace: null,
+    browserEnabled: true, managerEnabled: true, defaultWorkspace: null, coordinates: null,
   }
 }
 
@@ -134,4 +140,10 @@ export function sameRealmEndpoints(profile: Connection | undefined, profiles: Co
   const realm = profile.settings.realm
   return profiles.filter(candidate => candidate.provider === 'ceph' && candidate.settings?.realm === realm &&
     (candidate.endpointId ?? candidate.id) !== (profile.endpointId ?? profile.id))
+}
+
+
+export function validCoordinates(latitude: unknown, longitude: unknown): boolean {
+  return typeof latitude === 'number' && Number.isFinite(latitude) && Math.abs(latitude) <= 90 &&
+    typeof longitude === 'number' && Number.isFinite(longitude) && Math.abs(longitude) <= 180
 }

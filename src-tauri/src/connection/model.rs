@@ -58,6 +58,12 @@ pub enum Workspace {
     Portal,
 }
 
+#[derive(Clone, Copy, Deserialize, PartialEq, Serialize)]
+pub struct EndpointCoordinates {
+    pub latitude: f64,
+    pub longitude: f64,
+}
+
 #[derive(Clone, Deserialize, PartialEq, Serialize)]
 #[serde(default, rename_all = "camelCase")]
 pub struct EndpointSettings {
@@ -71,6 +77,7 @@ pub struct EndpointSettings {
     pub browser_enabled: bool,
     pub manager_enabled: bool,
     pub default_workspace: Option<Workspace>,
+    pub coordinates: Option<EndpointCoordinates>,
 }
 
 impl Default for EndpointSettings {
@@ -86,6 +93,7 @@ impl Default for EndpointSettings {
             browser_enabled: true,
             manager_enabled: true,
             default_workspace: None,
+            coordinates: None,
         }
     }
 }

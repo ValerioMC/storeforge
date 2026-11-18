@@ -148,8 +148,8 @@ async fn preserves_partial_version_measurements_and_distributions() {
     assert_eq!(usage.noncurrent_bytes, Some(10));
     assert_eq!(usage.delete_markers, Some(1));
     assert_eq!(usage.types["application/pdf"].objects, 2);
-    assert_eq!(usage.ages["7–29 days"].bytes, 10);
-    assert_eq!(usage.storage_classes["GLACIER"].bytes, 10);
+    assert_eq!(usage.ages["7–29 days"].bytes, Some(10));
+    assert_eq!(usage.storage_classes["GLACIER"].bytes, Some(10));
     assert!(requests[1].contains("version-id-marker=old"));
 }
 
@@ -197,6 +197,7 @@ fn reopens_a_stale_sample_with_an_explicit_gap_and_a_measured_zero() {
         traffic_origin: Origin::new(&profile, Source::RgwUsage, Some(IdentityKind::Supervision)),
         buckets: Vec::new(),
         traffic: Reading::missing(Coverage::Unavailable, "Unavailable"),
+        scoped_traffic: None,
     };
     let repository = MonitoringRepository::open(directory.path().into()).unwrap();
     repository.usage(scope.clone(), sample).unwrap();
@@ -325,7 +326,7 @@ async fn signs_endpoint_traffic_and_tenant_bucket_quota_reads_with_distinct_iden
         sessions.push(open_session(scoped_profile, context, secret).unwrap());
     }
 
-    let traffic = super::rgw::traffic(&sessions[0], clock()).await;
+    let traffic = super::rgw::traffic(&sessions[0], clock(), None).await;
     assert_eq!(traffic.coverage, Coverage::Complete);
     assert_eq!(traffic.value.unwrap().totals.bytes_sent, Some(0));
     let (quota, storage) = super::rgw::bucket_info(&sessions[1], "archive").await;
@@ -338,4 +339,63 @@ async fn signs_endpoint_traffic_and_tenant_bucket_quota_reads_with_distinct_iden
     assert!(traffic_request.contains("show-summary=true"));
     assert!(quota_request.contains("Credential=ceph-admin-key/"));
     assert!(quota_request.contains("bucket=research%2Farchive"));
+}
+
+#[tokio::test]
+async fn workspace_dashboards_scoped_traffic_excludes_unrelated_or_unidentified_owners() {
+    const TRAFFIC: &str = r#"{"summary":[
+        {"user":"research$alice","total":{"bytes_sent":0,"bytes_received":25,"ops":4,"successful_ops":3}},
+        {"user":"other$alice","total":{"bytes_sent":500,"bytes_received":90,"ops":7,"successful_ops":5}},
+        {"total":{"bytes_sent":200,"bytes_received":50,"ops":3,"successful_ops":0}}]}"#;
+    let (endpoint, worker) = mock_endpoint(&[("200 OK", TRAFFIC)]);
+    let profile = profile(endpoint);
+    let context = describe_context(&profile, Workspace::CephAdmin, IdentityKind::S3).unwrap();
+    let id = profile.id;
+    let session = open_session(profile, context, FixtureCredentials.read(id).unwrap()).unwrap();
+    let reading = super::rgw::traffic(&session, clock(), Some("research$alice")).await;
+
+    let sample = reading.value.unwrap();
+    assert_eq!(reading.coverage, Coverage::Complete);
+    assert_eq!(sample.totals.bytes_sent, Some(0));
+    assert_eq!(sample.totals.requests, Some(4));
+    assert!(worker.join().unwrap()[0].contains("uid=research%24alice"));
+}
+
+#[test]
+fn workspace_dashboards_retains_quota_utilization_when_storage_and_limits_are_measured() {
+    use super::model::{BucketSample, Quota, RgwStorage};
+
+    let profile = profile(String::new());
+    let mut sample = UsageSample {
+        collected_at: clock(),
+        listing_origin: Origin::new(&profile, Source::S3Listing, Some(IdentityKind::S3)),
+        quota_origin: Origin::new(&profile, Source::RgwBucket, Some(IdentityKind::CephAdmin)),
+        traffic_origin: Origin::new(&profile, Source::RgwUsage, Some(IdentityKind::Supervision)),
+        bucket_coverage: Reading::complete(1),
+        buckets: vec![BucketSample {
+            bucket: "archive".into(),
+            collected_at: clock(),
+            usage: Reading::missing(Coverage::Denied, "Access denied"),
+            quota: Reading::complete(Quota {
+                enabled: true,
+                max_bytes: Some(200),
+                max_objects: None,
+            }),
+            rgw_storage: Reading::complete(RgwStorage {
+                bytes: 50,
+                objects: 2,
+            }),
+        }],
+        traffic: Reading::missing(Coverage::Unavailable, "No Supervision identity"),
+        scoped_traffic: None,
+    };
+
+    assert_eq!(super::history::point(&sample).quota_usage, Some(0.25));
+    sample.buckets[0].rgw_storage = Reading::complete(RgwStorage {
+        bytes: 0,
+        objects: 0,
+    });
+    assert_eq!(super::history::point(&sample).quota_usage, Some(0.0));
+    sample.bucket_coverage.coverage = Coverage::Partial;
+    assert_eq!(super::history::point(&sample).quota_usage, None);
 }

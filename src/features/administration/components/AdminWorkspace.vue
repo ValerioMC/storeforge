@@ -8,12 +8,13 @@ import EmptyState from '../../../components/ui/EmptyState.vue'
 import FadeRegion from '../../../components/ui/FadeRegion.vue'
 import Notice from '../../../components/ui/Notice.vue'
 import { identityAvailable, providerNames, type Connection, type IdentityKind } from '../../connection/model/connection'
+import type { CephGroup } from '../../connection/model/workspace'
 import { administer } from '../api/administration'
 import { operations, type Operation } from '../model/operations'
 import AdminResponse from './AdminResponse.vue'
 
-const props = defineProps<{ connection?: Connection; bucket?: string; demo: boolean; scope: 's3' | 'ceph' }>()
-const group = ref('IAM users')
+const props = defineProps<{ connection?: Connection; bucket?: string; initialGroup?: CephGroup; demo: boolean; scope: 's3' | 'ceph' }>()
+const group = ref<string>(props.initialGroup ?? 'IAM users')
 const selected = ref('')
 const values = ref<Record<string, string>>({})
 const error = ref('')

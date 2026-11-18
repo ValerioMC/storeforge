@@ -1,10 +1,11 @@
 import type { Bucket } from '../../bucket/model/bucket'
-import type { Connection } from '../../connection/model/connection'
+import { endpointSettings, type Connection } from '../../connection/model/connection'
 import type { ObjectDetails, ObjectRow, ObjectVersion } from './objects'
 
 export const demoConnection: Connection = {
   id: 'demo', name: 'Asteria Research', provider: 'ceph',
   endpoint: 'https://rgw.asteria.example', region: 'eu-west-1', pathStyle: true, knownBuckets: [],
+  settings: { ...endpointSettings(), coordinates: { latitude: 67.8, longitude: 20.2 } },
 }
 
 export const demoBuckets: Bucket[] = [
