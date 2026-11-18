@@ -44,7 +44,7 @@ pub struct ObjectPage {
     pub cursor: Option<String>,
 }
 
-#[derive(Clone, Deserialize, Serialize)]
+#[derive(Clone, Deserialize, Eq, Hash, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct VersionCursor {
     pub key: String,
@@ -60,6 +60,7 @@ pub struct ObjectVersion {
     pub delete_marker: bool,
     pub size: Option<i64>,
     pub modified: Option<String>,
+    pub storage_class: Option<String>,
 }
 
 #[derive(Serialize)]

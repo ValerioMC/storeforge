@@ -29,22 +29,36 @@ async fn rgw(
     operation: &Operation,
     values: &BTreeMap<String, String>,
 ) -> Result<String> {
-    let mut url = parse_endpoint(&session.profile.endpoint)?;
-    url.path_segments_mut()
-        .map_err(|_| AppError::Invalid("Invalid Ceph endpoint.".into()))?
-        .pop_if_empty()
-        .push("admin")
-        .extend(operation.action.split('/'));
-    url.query_pairs_mut()
-        .append_pair("format", "json")
-        .extend_pairs(&operation.fixed)
-        .extend_pairs(values);
     let method = operation
         .method
         .as_deref()
         .unwrap_or("GET")
         .parse::<Method>()
         .map_err(|error| AppError::Invalid(error.to_string()))?;
+    rgw_request(
+        session,
+        method,
+        &operation.action,
+        operation.fixed.iter().chain(values),
+    )
+    .await
+}
+
+pub(crate) async fn rgw_request(
+    session: &Session,
+    method: Method,
+    resource: &str,
+    filters: impl IntoIterator<Item = (impl AsRef<str>, impl AsRef<str>)>,
+) -> Result<String> {
+    let mut url = parse_endpoint(&session.profile.endpoint)?;
+    url.path_segments_mut()
+        .map_err(|_| AppError::Invalid("Invalid Ceph endpoint.".into()))?
+        .pop_if_empty()
+        .push("admin")
+        .extend(resource.split('/'));
+    url.query_pairs_mut()
+        .append_pair("format", "json")
+        .extend_pairs(filters);
     SignedClient::for_connection(&session.profile)?
         .send(session, "s3", request(method, url, None, Vec::new())?)
         .await

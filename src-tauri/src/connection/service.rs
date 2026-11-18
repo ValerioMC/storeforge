@@ -53,9 +53,29 @@ impl ConnectionService {
         }
     }
 
+    #[cfg(test)]
+    pub(crate) fn with_credentials(
+        repository: ConnectionRepository,
+        credentials: impl CredentialRepository + 'static,
+    ) -> Self {
+        Self {
+            repository,
+            credentials: Box::new(credentials),
+        }
+    }
+
     pub fn list(&self) -> Result<Vec<Connection>> {
         self.repository
             .read(|entries| Ok(entries.iter().map(|entry| entry.profile.clone()).collect()))
+    }
+
+    pub(crate) fn with_profile<T>(
+        &self,
+        id: Uuid,
+        read: impl FnOnce(&Connection) -> Result<T>,
+    ) -> Result<T> {
+        self.repository
+            .read(|entries| read(&profile_by_id(entries, id)?.profile))
     }
 
     pub async fn save(&self, draft: ConnectionDraft) -> Result<Connection> {

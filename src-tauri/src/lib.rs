@@ -5,6 +5,7 @@ mod common;
 mod connection;
 #[cfg(target_os = "macos")]
 mod dock_icon;
+mod monitoring;
 mod object;
 mod transfer;
 
@@ -18,6 +19,7 @@ use bucket::controller as bucket_commands;
 use connection::{
     controller as connection_commands, repository::ConnectionRepository, service::ConnectionService,
 };
+use monitoring::{controller as monitoring_commands, service::MonitoringService};
 use object::controller as object_commands;
 use transfer::{
     controller as transfer_commands, repository::JobRepository, service::TransferService,
@@ -38,6 +40,7 @@ pub fn run() {
             );
             app.manage(connections);
             app.manage(transfers);
+            app.manage(MonitoringService::open(directory.clone())?);
             app.manage(AuditService::open(directory)?);
             app.manage(AdministrationService::new()?);
             create_main_window(app)?;
@@ -72,6 +75,9 @@ pub fn run() {
             transfer_commands::check_integrity,
             administration_commands::administer,
             audit_commands::list_audit,
+            monitoring_commands::monitoring_cached,
+            monitoring_commands::monitoring_collect,
+            monitoring_commands::monitoring_check,
         ]);
     #[cfg(target_os = "macos")]
     let builder = builder.on_window_event(dock_icon::on_window_event);

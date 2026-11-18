@@ -1,11 +1,11 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 
 use aws_sdk_s3::Client;
 
 use crate::{
     common::error::{AppError, Result, storage_error},
     object::{
-        model::{Location, ObjectId, ObjectQuery, ObjectRow},
+        model::{Location, ObjectId, ObjectQuery, ObjectRow, ObjectVersion},
         repository,
     },
 };
@@ -13,43 +13,75 @@ use crate::{
 use super::model::{Comparison, ComparisonRow, Difference, Integrity, JobFailure, Usage};
 
 pub async fn objects(client: &Client, location: &Location) -> Result<Vec<ObjectRow>> {
+    let mut rows = Vec::new();
+    visit_objects(client, location, |page| rows.extend(page)).await?;
+    Ok(rows)
+}
+
+pub async fn visit_objects(
+    client: &Client,
+    location: &Location,
+    mut visit: impl FnMut(Vec<ObjectRow>),
+) -> Result<()> {
     let mut query = ObjectQuery {
         location: location.clone(),
         cursor: None,
         recursive: true,
     };
-    let mut rows = Vec::new();
+    let mut seen = HashSet::new();
     loop {
         let page = repository::list(client, &query).await?;
-        rows.extend(page.rows);
-        if page.cursor.is_none() {
-            return Ok(rows);
+        if let Some(cursor) = &page.cursor
+            && !seen.insert(cursor.clone())
+        {
+            return Err(repeated_cursor());
         }
-        if page.cursor == query.cursor {
-            return Err(AppError::Storage(
-                "The endpoint repeated a listing cursor.".into(),
-            ));
+        visit(page.rows);
+        if page.cursor.is_none() {
+            return Ok(());
         }
         query.cursor = page.cursor;
     }
 }
 
-pub async fn all_versions(client: &Client, location: &Location) -> Result<Vec<ObjectId>> {
+pub async fn visit_versions(
+    client: &Client,
+    location: &Location,
+    mut visit: impl FnMut(Vec<ObjectVersion>),
+) -> Result<()> {
+    let mut seen = HashSet::new();
     let mut cursor = None;
-    let mut versions = Vec::new();
     loop {
         let page =
             repository::versions(client, &location.bucket, &location.prefix, false, cursor).await?;
-        versions.extend(page.versions.into_iter().map(|version| ObjectId {
+        if let Some(next) = &page.cursor
+            && !seen.insert(next.clone())
+        {
+            return Err(repeated_cursor());
+        }
+        visit(page.versions);
+        cursor = page.cursor;
+        if cursor.is_none() {
+            return Ok(());
+        }
+    }
+}
+
+fn repeated_cursor() -> AppError {
+    AppError::Storage("The endpoint repeated a listing cursor.".into())
+}
+
+pub async fn all_versions(client: &Client, location: &Location) -> Result<Vec<ObjectId>> {
+    let mut versions = Vec::new();
+    visit_versions(client, location, |page| {
+        versions.extend(page.into_iter().map(|version| ObjectId {
             bucket: location.bucket.clone(),
             key: version.key,
             version_id: Some(version.version_id),
         }));
-        cursor = page.cursor;
-        if cursor.is_none() {
-            return Ok(versions);
-        }
-    }
+    })
+    .await?;
+    Ok(versions)
 }
 
 pub async fn usage(client: &Client, location: &Location, include_versions: bool) -> Result<Usage> {
@@ -73,22 +105,12 @@ pub async fn usage(client: &Client, location: &Location, include_versions: bool)
 }
 
 async fn count_versions(client: &Client, location: &Location, usage: &mut Usage) -> Result<()> {
-    let mut cursor = None;
-    loop {
-        let page =
-            repository::versions(client, &location.bucket, &location.prefix, false, cursor).await?;
-        let markers = page
-            .versions
-            .iter()
-            .filter(|version| version.delete_marker)
-            .count();
+    visit_versions(client, location, |page| {
+        let markers = page.iter().filter(|version| version.delete_marker).count();
         usage.delete_markers += markers;
-        usage.versions += page.versions.len() - markers;
-        cursor = page.cursor;
-        if cursor.is_none() {
-            return Ok(());
-        }
-    }
+        usage.versions += page.len() - markers;
+    })
+    .await
 }
 
 pub async fn compare(

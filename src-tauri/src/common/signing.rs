@@ -16,20 +16,26 @@ pub struct SignedClient(reqwest::Client);
 
 impl SignedClient {
     pub fn for_connection(profile: &Connection) -> Result<Self> {
-        let mut builder = reqwest::Client::builder()
-            .redirect(reqwest::redirect::Policy::none())
-            .timeout(Duration::from_secs(45));
-        if !profile.settings.ca_certificate.trim().is_empty() {
-            let certificates =
-                reqwest::Certificate::from_pem_bundle(profile.settings.ca_certificate.as_bytes())
-                    .map_err(transport_error)?;
-            for certificate in certificates {
-                builder = builder.add_root_certificate(certificate);
-            }
-        }
-        Ok(Self(builder.build().map_err(transport_error)?))
+        Ok(Self(endpoint_client(profile, Duration::from_secs(45))?))
     }
+}
 
+pub fn endpoint_client(profile: &Connection, timeout: Duration) -> Result<reqwest::Client> {
+    let mut builder = reqwest::Client::builder()
+        .redirect(reqwest::redirect::Policy::none())
+        .timeout(timeout);
+    if !profile.settings.ca_certificate.trim().is_empty() {
+        let certificates =
+            reqwest::Certificate::from_pem_bundle(profile.settings.ca_certificate.as_bytes())
+                .map_err(transport_error)?;
+        for certificate in certificates {
+            builder = builder.add_root_certificate(certificate);
+        }
+    }
+    builder.build().map_err(transport_error)
+}
+
+impl SignedClient {
     pub async fn send(
         &self,
         session: &Session,

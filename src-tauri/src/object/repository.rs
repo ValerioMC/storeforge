@@ -56,6 +56,12 @@ pub async fn list(client: &Client, query: &ObjectQuery) -> Result<ObjectPage> {
             etag: object.e_tag().map(str::to_owned),
         })
     }));
+    if page.is_truncated() == Some(true) && page.next_continuation_token().is_none_or(str::is_empty)
+    {
+        return Err(AppError::Storage(
+            "The truncated object listing omitted its continuation token.".into(),
+        ));
+    }
     Ok(ObjectPage {
         rows,
         cursor: page.next_continuation_token().map(str::to_owned),
@@ -116,6 +122,11 @@ pub async fn versions(
         .filter(|version| !exact || version.key == prefix)
         .collect();
     versions.sort_by(|left, right| right.modified.cmp(&left.modified));
+    if page.is_truncated() == Some(true) && page.next_key_marker().is_none_or(str::is_empty) {
+        return Err(AppError::Storage(
+            "The truncated version listing omitted its continuation marker.".into(),
+        ));
+    }
     let cursor = page
         .next_key_marker()
         .filter(|key| !exact || *key == prefix)
@@ -134,6 +145,7 @@ fn version_row(version: &S3Version) -> Option<ObjectVersion> {
         delete_marker: false,
         size: version.size(),
         modified: version.last_modified().map(ToString::to_string),
+        storage_class: version.storage_class().map(ToString::to_string),
     })
 }
 
@@ -145,6 +157,7 @@ fn marker_row(version: &DeleteMarkerEntry) -> Option<ObjectVersion> {
         delete_marker: true,
         size: None,
         modified: version.last_modified().map(ToString::to_string),
+        storage_class: None,
     })
 }
 
