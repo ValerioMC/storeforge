@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
+import { storeToRefs } from 'pinia'
 import { Archive, ArrowDownToLine, ArrowLeft, ChevronDown, ChevronRight, ClipboardPaste, Copy, Database, Ellipsis, Folder, FolderPlus, Layers3, ListFilter, RefreshCw, Scissors, Search, Settings2, Trash2, Upload, X } from 'lucide-vue-next'
 import { formatSize } from '../../../common/format'
 import ConfirmDialog from '../../../components/ui/ConfirmDialog.vue'
@@ -8,6 +9,7 @@ import FadeRegion from '../../../components/ui/FadeRegion.vue'
 import Modal from '../../../components/ui/Modal.vue'
 import Notice from '../../../components/ui/Notice.vue'
 import BucketSettings from '../../bucket/components/BucketSettings.vue'
+import { workspaceAvailable } from '../../connection/model/workspace'
 import { useConnections } from '../../connection/store/connections'
 import { useObjectActions } from '../composables/useObjectActions'
 import { displayName, objectId, parentPrefix, type ObjectId, type ObjectRow, type Tag } from '../model/objects'
@@ -19,12 +21,10 @@ import TagEditor from './TagEditor.vue'
 import VersionList from './VersionList.vue'
 
 const props = defineProps<{ demo: boolean; compact: boolean }>()
-const emit = defineEmits<{ add: []; demo: []; createBucket: []; tools: []; job: [id: string] }>()
+const emit = defineEmits<{ add: []; demo: []; createBucket: []; navigate: [bucket: string, prefix?: string]; tools: []; job: [id: string] }>()
 const browser = useBrowser()
 const connections = useConnections()
-const tab = ref<'Objects' | 'Versions' | 'Settings'>('Objects')
-const filter = ref('')
-const technical = ref(false)
+const { tab, filter, technical } = storeToRefs(browser)
 const folder = ref(false)
 const bulkTags = ref(false)
 const deleteItems = ref<ObjectId[]>([])
@@ -54,16 +54,16 @@ const pasteDescription = computed(() => {
   const count = clipboard.value?.objects.length ?? 0
   return `${count} ${count === 1 ? 'object' : 'objects'} will be transferred. The job checks for existing destination keys before writing.`
 })
+const managerAvailable = computed(() => workspaceAvailable(connections.active, 'manager'))
 const readonly = computed(() => props.demo || !browser.bucket)
 
-watch(() => [browser.location.connection, browser.bucket], () => { tab.value = 'Objects' })
 watch(() => connections.contextKey, () => {
   folder.value = false
   bulkTags.value = false
   deleteItems.value = []
   pasteReview.value = false
 }, { flush: 'sync' })
-watch(() => browser.prefix, () => { filter.value = ''; editPath.value = false })
+watch(() => browser.prefix, () => { editPath.value = false })
 watch(tab, value => { if (value !== 'Objects') browser.focus = null })
 
 defineExpose({
@@ -89,7 +89,7 @@ function restoreInspectorFocus(): void {
 
 function openRow(row: ObjectRow): void {
   if (row.folder) {
-    void browser.navigate(browser.bucket, row.key)
+    emit('navigate', browser.bucket, row.key)
   } else {
     browser.focus = objectId(browser.bucket, row.key)
   }
@@ -98,7 +98,7 @@ function openRow(row: ObjectRow): void {
 function jump(): void {
   const path = !pathDraft.value || pathDraft.value.endsWith('/') ? pathDraft.value : `${pathDraft.value}/`
   editPath.value = false
-  void browser.navigate(browser.bucket, path)
+  emit('navigate', browser.bucket, path)
 }
 
 function beginPath(): void {
@@ -131,7 +131,7 @@ async function setTags(tags: Tag[]): Promise<void> {
 }
 
 async function removeBucket(): Promise<void> {
-  await browser.navigate('')
+  emit('navigate', '')
   await browser.loadBuckets()
 }
 
@@ -166,10 +166,10 @@ async function copyPath(): Promise<void> {
           <div class="listing-content">
             <header class="listing-header">
               <nav aria-label="Current S3 path" class="breadcrumbs">
-                <button class="crumb-root" :title="browser.bucket" @click="browser.navigate(browser.bucket)"><Database :size="15" />{{ browser.bucket }}</button>
+                <button class="crumb-root" :title="browser.bucket" @click="emit('navigate', browser.bucket)"><Database :size="15" />{{ browser.bucket }}</button>
                 <template v-for="part in tab === 'Settings' ? [] : pathParts" :key="part.path">
                   <ChevronRight :size="13" />
-                  <button :title="part.path" @click="browser.navigate(browser.bucket, part.path)">{{ part.name }}</button>
+                  <button :title="part.path" @click="emit('navigate', browser.bucket, part.path)">{{ part.name }}</button>
                 </template>
               </nav>
               <div class="heading-line">
@@ -195,7 +195,7 @@ async function copyPath(): Promise<void> {
                     <Search :size="17" /><input ref="filterField" v-model="filter" type="search" placeholder="Filter loaded objects…" aria-label="Filter loaded objects" /><kbd>Ctrl K</kbd>
                   </label>
                   <div class="object-tool-buttons">
-                    <button v-if="browser.prefix" class="icon-button" title="Parent folder" aria-label="Parent folder" @click="browser.navigate(browser.bucket, parentPrefix(browser.prefix))"><ArrowLeft :size="17" /></button>
+                    <button v-if="browser.prefix" class="icon-button" title="Parent folder" aria-label="Parent folder" @click="emit('navigate', browser.bucket, parentPrefix(browser.prefix))"><ArrowLeft :size="17" /></button>
                     <button class="button-label" title="New folder" :disabled="readonly" @click="folder = true"><FolderPlus :size="17" /><span>New folder</span></button>
                     <button class="icon-button" aria-label="Refresh objects" title="Refresh objects" :disabled="browser.loading" @click="refresh"><RefreshCw :size="16" :class="{ spinning: browser.loading }" /></button>
                     <details class="tool-menu">
@@ -205,7 +205,7 @@ async function copyPath(): Promise<void> {
                         <button @click="copyPath">Copy S3 path</button>
                         <button @click="browser.recursive = !browser.recursive; browser.loadRows()">{{ browser.recursive ? 'Show folders' : 'List recursively' }}</button>
                         <button @click="technical = !technical">{{ technical ? 'Hide storage class' : 'Show storage class' }}</button>
-                        <button :disabled="readonly" @click="emit('tools')">Prefix metrics and tools</button>
+                        <button :disabled="readonly || !managerAvailable" @click="emit('tools')">Prefix metrics and tools</button>
                       </div>
                     </details>
                   </div>
@@ -270,7 +270,7 @@ async function copyPath(): Promise<void> {
         </EmptyState>
         <p v-else-if="browser.bucketLoading" class="loading-line" role="status">Loading buckets…</p>
         <div v-else-if="browser.buckets.length" class="settings-sheet">
-          <button v-for="bucket in browser.buckets" :key="bucket.name" class="settings-row bucket-card" @click="browser.navigate(bucket.name)">
+          <button v-for="bucket in browser.buckets" :key="bucket.name" class="settings-row bucket-card" @click="emit('navigate', bucket.name)">
             <span class="file-icon"><Database :size="18" /></span><strong>{{ bucket.name }}</strong><ChevronRight :size="17" />
           </button>
         </div>

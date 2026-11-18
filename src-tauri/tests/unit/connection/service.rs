@@ -40,6 +40,8 @@ fn execution_context_preserves_legacy_profile_and_keyring_reference() {
     );
     assert_eq!(stored.profile.known_buckets, ["shared"]);
     assert!(stored.profile.path_style);
+    assert!(stored.profile.settings.browser_enabled);
+    assert!(stored.profile.settings.manager_enabled);
     assert_eq!(
         stored.secret_id.to_string(),
         "dd307edf-cb37-4494-a029-a9d472ad6c13"

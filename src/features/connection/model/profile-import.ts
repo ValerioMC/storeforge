@@ -11,16 +11,28 @@ export function parseProfile(source: string): ProfileFields {
   const settings = endpointSettings()
   if (input.settings !== undefined) {
     if (!isRecord(input.settings)) throw new Error('Invalid endpoint settings.')
-    const { tenant, account, realm, defaultEndpoint, standardTags, administrativeTags, caCertificate } = input.settings
+    const values = input.settings
     for (const key of ['tenant', 'account', 'realm', 'caCertificate'] as const) {
-      const value = input.settings[key]
-      if (value !== undefined && typeof value !== 'string') throw new Error('Invalid endpoint settings.')
+      const value = values[key]
+      if (typeof value === 'string') settings[key] = value
+      else if (value !== undefined) throw new Error('Invalid endpoint settings.')
     }
-    if ((defaultEndpoint !== undefined && typeof defaultEndpoint !== 'boolean') ||
-      (standardTags !== undefined && !isStringList(standardTags)) ||
-      (administrativeTags !== undefined && !isStringList(administrativeTags))) throw new Error('Invalid endpoint settings.')
-    Object.assign(settings, { tenant: tenant ?? '', account: account ?? '', realm: realm ?? '', defaultEndpoint: defaultEndpoint ?? false,
-      standardTags: standardTags ?? [], administrativeTags: administrativeTags ?? [], caCertificate: caCertificate ?? '' })
+    for (const key of ['defaultEndpoint', 'browserEnabled', 'managerEnabled'] as const) {
+      const value = values[key]
+      if (typeof value === 'boolean') settings[key] = value
+      else if (value !== undefined) throw new Error('Invalid workspace settings.')
+    }
+    for (const key of ['standardTags', 'administrativeTags'] as const) {
+      const value = values[key]
+      if (isStringList(value)) settings[key] = value
+      else if (value !== undefined) throw new Error('Invalid profile tags.')
+    }
+    const preferred = values.defaultWorkspace
+    if (preferred === 'browser' || preferred === 'manager' || preferred === 'cephAdmin' || preferred === 'admin') {
+      settings.defaultWorkspace = preferred
+    } else if (preferred !== undefined && preferred !== null) {
+      throw new Error('Invalid default workspace.')
+    }
   }
   return { name, provider, endpoint, region, pathStyle, knownBuckets, settings }
 }

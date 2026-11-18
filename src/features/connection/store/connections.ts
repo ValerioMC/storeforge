@@ -2,7 +2,7 @@ import { computed, ref } from 'vue'
 import { defineStore } from 'pinia'
 import { connectionsApi } from '../api/connections'
 import { demoConnection } from '../../browser/model/demo'
-import { executionContext, sameRealmEndpoints, type Connection, type ConnectionDraft } from '../model/connection'
+import { sameRealmEndpoints, type Connection, type ConnectionDraft } from '../model/connection'
 
 export const useConnections = defineStore('connections', () => {
   const profiles = ref<Connection[]>([])
@@ -10,12 +10,11 @@ export const useConnections = defineStore('connections', () => {
   const active = computed(() => activeId.value === 'demo' ? demoConnection : profiles.value.find(connection => connection.id === activeId.value))
 
   const contextKey = computed(() => active.value ? JSON.stringify([active.value.id, active.value.revision]) : '')
-  const browserContext = computed(() => active.value && executionContext(active.value, 'browser'))
   const realmEndpoints = computed(() => sameRealmEndpoints(active.value, profiles.value))
 
   async function load(): Promise<void> {
     profiles.value = await connectionsApi.list()
-    const remembered = localStorage.getItem('storeforge.connection')
+    const remembered = window.localStorage.getItem('storeforge.connection')
     const preferred = profiles.value.find(profile => profile.id === remembered)
     activeId.value = preferred?.id ?? defaultProfileId()
   }
@@ -26,13 +25,12 @@ export const useConnections = defineStore('connections', () => {
 
   function select(id: string): void {
     activeId.value = id
-    if (id !== 'demo') localStorage.setItem('storeforge.connection', id)
+    if (id !== 'demo') window.localStorage.setItem('storeforge.connection', id)
   }
 
   async function save(draft: ConnectionDraft): Promise<Connection> {
     const profile = await connectionsApi.save(draft)
     profiles.value = await connectionsApi.list()
-    select(profile.id)
     return profile
   }
 
@@ -42,5 +40,5 @@ export const useConnections = defineStore('connections', () => {
     if (activeId.value === id) select(defaultProfileId())
   }
 
-  return { profiles, activeId, active, contextKey, browserContext, realmEndpoints, load, select, save, remove }
+  return { profiles, activeId, active, contextKey, realmEndpoints, load, select, save, remove }
 })

@@ -47,7 +47,7 @@ pub enum CapabilityState {
     Denied,
 }
 
-#[derive(Clone, Copy, Deserialize, Serialize)]
+#[derive(Clone, Copy, Deserialize, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub enum Workspace {
     Browser,
@@ -58,7 +58,7 @@ pub enum Workspace {
     Portal,
 }
 
-#[derive(Clone, Default, Deserialize, PartialEq, Serialize)]
+#[derive(Clone, Deserialize, PartialEq, Serialize)]
 #[serde(default, rename_all = "camelCase")]
 pub struct EndpointSettings {
     pub tenant: String,
@@ -68,6 +68,26 @@ pub struct EndpointSettings {
     pub standard_tags: Vec<String>,
     pub administrative_tags: Vec<String>,
     pub ca_certificate: String,
+    pub browser_enabled: bool,
+    pub manager_enabled: bool,
+    pub default_workspace: Option<Workspace>,
+}
+
+impl Default for EndpointSettings {
+    fn default() -> Self {
+        Self {
+            tenant: String::new(),
+            account: String::new(),
+            realm: String::new(),
+            default_endpoint: false,
+            standard_tags: Vec::new(),
+            administrative_tags: Vec::new(),
+            ca_certificate: String::new(),
+            browser_enabled: true,
+            manager_enabled: true,
+            default_workspace: None,
+        }
+    }
 }
 
 #[derive(Clone, Deserialize, Serialize)]

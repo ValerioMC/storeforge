@@ -1,19 +1,27 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
-import { Activity, Box, CircleHelp, FolderCog, List, PanelLeftClose, PanelLeftOpen, ShieldCheck, SlidersHorizontal } from 'lucide-vue-next'
+import { Activity, ArrowLeft, ArrowRight, ChevronRight, CircleHelp, PanelLeftClose, PanelLeftOpen, Server } from 'lucide-vue-next'
 import { errorMessage, isTauri } from './common/tauri'
 import Sidebar from './components/shell/Sidebar.vue'
 import WindowControls from './components/shell/WindowControls.vue'
+import AppSelect from './components/ui/AppSelect.vue'
 import FadeRegion from './components/ui/FadeRegion.vue'
 import Notice from './components/ui/Notice.vue'
 import AdminWorkspace from './features/administration/components/AdminWorkspace.vue'
 import BrowserWorkspace from './features/browser/components/BrowserWorkspace.vue'
+import { demoConnection } from './features/browser/model/demo'
 import { useBrowser } from './features/browser/store/browser'
 import NewBucketDialog from './features/bucket/components/NewBucketDialog.vue'
 import ConnectionEditor from './features/connection/components/ConnectionEditor.vue'
 import ConnectionsWorkspace from './features/connection/components/ConnectionsWorkspace.vue'
-import type { Connection } from './features/connection/model/connection'
+import ManagerWorkspace from './features/connection/components/ManagerWorkspace.vue'
+import WorkspaceHelp from './features/connection/components/WorkspaceHelp.vue'
+import WorkspacePreferences from './features/connection/components/WorkspacePreferences.vue'
+import { providerNames, type Connection } from './features/connection/model/connection'
+import { pausedSetup } from './features/connection/model/setup-draft'
+import { defaultRoute, routeTitle, workspaceAvailable, workspaceNames, type WorkspaceDestination, type WorkspaceRoute } from './features/connection/model/workspace'
 import { useConnections } from './features/connection/store/connections'
+import { useWorkspaceNavigation } from './features/connection/store/workspace-navigation'
 import ActivityWorkspace from './features/transfer/components/ActivityWorkspace.vue'
 import ToolsWorkspace from './features/transfer/components/ToolsWorkspace.vue'
 import { useJobs } from './features/transfer/store/jobs'
@@ -21,30 +29,51 @@ import { useJobs } from './features/transfer/store/jobs'
 const connections = useConnections()
 const browser = useBrowser()
 const jobs = useJobs()
-const activePage = ref<'Objects' | 'Tools' | 'Administration' | 'Activity' | 'Connections'>('Objects')
-const pages = [
-  { name: 'Objects', icon: Box }, { name: 'Tools', icon: FolderCog },
-  { name: 'Administration', icon: ShieldCheck }, { name: 'Activity', icon: Activity },
-] as const
+const navigation = useWorkspaceNavigation()
+const route = computed(() => navigation.current ?? defaultRoute())
 const editor = ref(false)
-const profile = ref<Connection>()
+const editedProfile = ref<Connection>()
+const hasDraft = ref(!!pausedSetup())
 const creatingBucket = ref(false)
-const focusJob = ref<string | null>(null)
-const sidebar = ref(true)
-const compact = ref(localStorage.getItem('storeforge.density') === 'compact')
+const help = ref(false)
+const sidebar = ref(window.localStorage.getItem('storeforge.sidebar') !== 'closed')
+const compact = ref(window.localStorage.getItem('storeforge.density') === 'compact')
+const showTags = ref(window.localStorage.getItem('storeforge.selectorTags') === 'true')
+const startup = ref(window.localStorage.getItem('storeforge.startupContext') ?? '')
 const startError = ref('')
 const browserView = ref<InstanceType<typeof BrowserWorkspace>>()
 const demo = computed(() => connections.activeId === 'demo')
+const contextOptions = computed(() => [
+  ...connections.profiles.map(profile => ({ value: profile.id, label: profileLabel(profile) })),
+  { value: 'demo', label: 'Asteria Research (demo)' },
+])
+const realmOptions = computed(() => connections.active ? [
+  { value: connections.active.id, label: profileLabel(connections.active) },
+  ...connections.realmEndpoints.map(profile => ({ value: profile.id, label: profileLabel(profile) })),
+] : [])
+const canBrowse = computed(() => workspaceAvailable(connections.active, 'browser'))
+const canManage = computed(() => workspaceAvailable(connections.active, 'manager'))
+const managerProfiles = computed(() => connections.profiles.filter(profile => workspaceAvailable(profile, 'manager')))
+const managerRoute = computed(() => route.value.workspace === 'manager' ? route.value : undefined)
+const toolsLocation = computed(() => ({
+  connection: browser.location.connection,
+  bucket: managerRoute.value?.bucket ?? browser.bucket,
+  prefix: managerRoute.value?.bucket ? (managerRoute.value.bucket === browser.bucket ? browser.prefix : '') : browser.prefix,
+}))
+const resource = computed(() => route.value.workspace === 'browser' ? route.value.prefix || route.value.bucket : managerRoute.value?.bucket)
 const windowChrome = (window as Window & { __storeforgeWindowChrome?: 'overlay' | 'custom' }).__storeforgeWindowChrome
 const dragRegion = windowChrome ? 'deep' : undefined
 let timer: number | undefined
 let previousRunning = new Set<string>()
+let browserContext = ''
 
-watch(() => connections.contextKey, () => {
-  creatingBucket.value = false
-  void browser.changeConnection(connections.browserContext?.connectionId ?? '')
-}, { flush: 'sync' })
-watch(compact, value => localStorage.setItem('storeforge.density', value ? 'compact' : 'comfortable'))
+watch([() => navigation.current, () => connections.profiles], () => {
+  if (navigation.current) synchronize(navigation.current)
+})
+watch(sidebar, value => window.localStorage.setItem('storeforge.sidebar', value ? 'open' : 'closed'))
+watch(compact, value => window.localStorage.setItem('storeforge.density', value ? 'compact' : 'comfortable'))
+watch(showTags, value => window.localStorage.setItem('storeforge.selectorTags', String(value)))
+watch(startup, value => window.localStorage.setItem('storeforge.startupContext', value))
 watch(() => jobs.jobs, jobList => {
   const completed = jobList.some(job => previousRunning.has(job.id) && job.status !== 'running')
   previousRunning = new Set(jobList.filter(job => job.status === 'running').map(job => job.id))
@@ -62,18 +91,62 @@ onUnmounted(() => {
   window.removeEventListener('keydown', keydown)
 })
 
+function findProfile(id: string): Connection | undefined {
+  return id === 'demo' ? demoConnection : connections.profiles.find(profile => profile.id === id)
+}
+
+function profileLabel(profile: Connection): string {
+  const scope = [profile.settings?.tenant, profile.settings?.account].filter(Boolean)
+  const tags = showTags.value ? profile.settings?.standardTags ?? [] : []
+  return [profile.name, ...scope, ...tags].join(' · ')
+}
+
+function routeAllowed(candidate: WorkspaceRoute): boolean {
+  const selected = findProfile(candidate.connectionId)
+  return (!candidate.connectionId || !!selected) && workspaceAvailable(selected, candidate.workspace)
+}
+
 async function initialize(): Promise<void> {
   try {
     await connections.load()
-    if (new URLSearchParams(window.location.search).get('demo') === '1') openDemo()
-    await jobs.load()
   } catch (failure) {
     startError.value = errorMessage(failure)
   }
+  const preferred = findProfile(startup.value)
+  const fallback = defaultRoute(preferred ?? connections.active)
+  navigation.initialize(fallback, routeAllowed)
+  if (new URLSearchParams(window.location.search).get('demo') === '1') openDemo()
+  else if (preferred) navigation.go(fallback)
+  await jobs.load()
+}
+
+function synchronize(destination: WorkspaceRoute): void {
+  const selected = findProfile(destination.connectionId)
+  if (!routeAllowed(destination)) {
+    navigation.replace(defaultRoute(selected ?? connections.active))
+    return
+  }
+  if (destination.connectionId !== connections.activeId) connections.select(destination.connectionId)
+  const allowed = workspaceAvailable(selected, 'browser') || workspaceAvailable(selected, 'manager')
+  const key = allowed ? connections.contextKey : ''
+  if (key !== browserContext) {
+    creatingBucket.value = false
+    browserContext = key
+    void browser.changeConnection(allowed ? destination.connectionId : '', selected?.revision ?? '')
+  }
+  if (destination.workspace === 'browser') void browser.navigate(destination.bucket ?? '', destination.prefix ?? '')
 }
 
 function keydown(event: KeyboardEvent): void {
-  if (activePage.value !== 'Objects' || !browser.bucket || document.querySelector('dialog[open]')) return
+  if (document.querySelector('dialog[open]')) return
+  const typing = event.target instanceof HTMLElement && (event.target.matches('input, textarea, [contenteditable]'))
+  if (event.altKey && !typing && (event.key === 'ArrowLeft' || event.key === 'ArrowRight')) {
+    event.preventDefault()
+    if (event.key === 'ArrowLeft') navigation.back()
+    else navigation.forward()
+    return
+  }
+  if (route.value.workspace !== 'browser' || !browser.bucket) return
   if (event.key === 'Escape') browserView.value?.closeInspector()
   if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
     event.preventDefault()
@@ -81,91 +154,145 @@ function keydown(event: KeyboardEvent): void {
   }
 }
 
-function openDemo(): void {
-  connections.select('demo')
-  activePage.value = 'Objects'
+function go(destination: WorkspaceDestination): void {
+  if (!workspaceAvailable(connections.active, destination.workspace)) return
+  if (destination.workspace === 'browser' && !destination.bucket && browser.bucket) {
+    destination = { workspace: 'browser', bucket: browser.bucket, prefix: browser.prefix }
+  }
+  navigation.go({ ...destination, connectionId: connections.activeId })
 }
 
-function openBucket(name: string): void {
-  activePage.value = 'Objects'
-  void browser.navigate(name)
+function openWorkspaceRoot(): void {
+  if (route.value.workspace === 'browser') openBucket('')
+  else if (route.value.workspace === 'manager') go({ workspace: 'manager', page: 'overview' })
+  else if (route.value.workspace === 'admin') go({ workspace: 'admin', page: 'connections' })
+}
+
+function openDemo(): void {
+  navigation.go(defaultRoute(demoConnection))
+}
+
+function selectContext(id: string): void {
+  if (id !== connections.activeId) navigation.go(defaultRoute(findProfile(id)))
+}
+
+function openProfile(profile: Connection): void {
+  navigation.go(defaultRoute(profile))
+}
+
+function openBucket(bucket: string, prefix?: string): void {
+  if (!canBrowse.value) return
+  navigation.go({ workspace: 'browser', connectionId: connections.activeId, bucket: bucket || undefined, prefix: prefix || undefined })
 }
 
 function openEditor(value?: Connection): void {
-  profile.value = value
+  editedProfile.value = value
   editor.value = true
 }
 
-function connectionSaved(): void {
+function closeEditor(): void {
   editor.value = false
-  activePage.value = 'Objects'
+  hasDraft.value = !!pausedSetup()
 }
 
-async function bucketCreated(name: string): Promise<void> {
+function connectionSaved(profile: Connection): void {
+  closeEditor()
+  openProfile(profile)
+}
+
+function bucketCreated(name: string): void {
   creatingBucket.value = false
-  await browser.loadBuckets()
-  openBucket(name)
+  void browser.loadBuckets()
+  if (route.value.workspace === 'manager') go({ workspace: 'manager', page: 'buckets', bucket: name })
+  else openBucket(name)
 }
 
 function jobStarted(id: string): void {
-  focusJob.value = id
   if (jobs.jobs.find(job => job.id === id)?.status !== 'running' && browser.bucket) void browser.loadRows()
 }
 
 function showJob(id: string): void {
   jobStarted(id)
-  activePage.value = 'Activity'
+  go({ workspace: 'admin', page: 'activity', jobId: id })
 }
 </script>
 
 <template>
   <div class="app-shell" :class="{ 'sidebar-collapsed': !sidebar }" :data-window-chrome="windowChrome">
-    <Sidebar v-if="sidebar" :demo="demo" :browse="activePage === 'Objects'" :drag-region="dragRegion" @add="openEditor()" @connections="activePage = 'Connections'"
-      @bucket="openBucket" @create-bucket="creatingBucket = true" @demo="openDemo" />
+    <Sidebar v-if="sidebar" :route="route" :demo="demo" :has-draft="hasDraft" :drag-region="dragRegion"
+      @add="openEditor()" @go="go" @bucket="openBucket" @create-bucket="creatingBucket = true" />
     <main class="app-main">
-      <header class="app-bar" :data-tauri-drag-region="dragRegion">
-        <button class="icon-button subtle side-toggle" :aria-label="sidebar ? 'Hide sidebar' : 'Show sidebar'" :aria-expanded="sidebar" @click="sidebar = !sidebar">
-          <PanelLeftClose v-if="sidebar" :size="18" /><PanelLeftOpen v-else :size="18" />
-        </button>
-        <nav class="app-nav" aria-label="Workspaces">
-          <button v-for="page in pages" :key="page.name" :class="{ active: activePage === page.name }" :aria-current="activePage === page.name ? 'page' : undefined" @click="activePage = page.name">
-            <component :is="page.icon" :size="17" /><span>{{ page.name }}</span>
-            <span v-if="page.name === 'Activity' && jobs.active" class="activity-count">{{ jobs.active }}</span>
-          </button>
+      <div class="shell-top">
+        <header class="app-bar" :data-tauri-drag-region="dragRegion">
+          <div class="shell-navigation">
+            <button class="icon-button subtle" :aria-label="sidebar ? 'Hide sidebar' : 'Show sidebar'" :aria-expanded="sidebar" @click="sidebar = !sidebar">
+              <PanelLeftClose v-if="sidebar" :size="18" /><PanelLeftOpen v-else :size="18" />
+            </button>
+            <div class="history-actions">
+              <button class="icon-button subtle" aria-label="Go back" title="Go back (Alt + Left)" :disabled="!navigation.canBack" @click="navigation.back()"><ArrowLeft :size="17" /></button>
+              <button class="icon-button subtle" aria-label="Go forward" title="Go forward (Alt + Right)" :disabled="!navigation.canForward" @click="navigation.forward()"><ArrowRight :size="17" /></button>
+            </div>
+          </div>
+          <div class="shell-context">
+            <AppSelect id="active-connection" :model-value="connections.activeId" :options="contextOptions"
+              aria-label="Connection context" placeholder="Select a connection" @update:model-value="selectContext">
+              <template #leading><Server :size="16" /></template>
+            </AppSelect>
+            <AppSelect v-if="realmOptions.length > 1" :model-value="connections.activeId" :options="realmOptions" aria-label="Same-realm profile" @update:model-value="selectContext" />
+          </div>
+          <div class="top-controls">
+            <span v-if="demo" class="demo-label"><span class="status-dot online" /> Read-only demo</span>
+            <span v-else-if="connections.active" class="connection-status">{{ providerNames[connections.active.provider] }}</span>
+            <button class="icon-button subtle" type="button" :aria-label="`${workspaceNames[route.workspace]} help`" @click="help = true"><CircleHelp :size="18" /></button>
+          </div>
+          <WindowControls v-if="windowChrome === 'custom'" @error="startError = $event" />
+        </header>
+        <nav class="shell-breadcrumbs" aria-label="Workspace breadcrumb">
+          <button v-if="resource || route.workspace === 'manager' || (route.workspace === 'admin' && route.page !== 'connections')"
+            type="button" class="subtle" @click="openWorkspaceRoot">{{ workspaceNames[route.workspace] }}</button>
+          <span v-else :aria-current="routeTitle(route) === workspaceNames[route.workspace] ? 'page' : undefined">{{ workspaceNames[route.workspace] }}</span>
+          <template v-if="routeTitle(route) !== workspaceNames[route.workspace]">
+            <ChevronRight :size="13" />
+            <button v-if="resource && managerRoute?.page === 'buckets'" type="button" class="subtle" @click="go({ workspace: 'manager', page: 'buckets' })">{{ routeTitle(route) }}</button>
+            <span v-else :aria-current="resource ? undefined : 'page'">{{ routeTitle(route) }}</span>
+          </template>
+          <template v-if="resource"><ChevronRight :size="13" /><span class="shell-resource" :title="resource" aria-current="location">{{ resource }}</span></template>
         </nav>
-        <div class="top-controls">
-          <span v-if="demo" class="demo-label"><span class="status-dot online" /> Demo workspace</span>
-          <span v-else class="connection-status"><span class="status-dot" :class="{ online: connections.active && !browser.bucketError && !browser.bucketLoading }" />{{ browser.bucketLoading ? 'Connecting…' : !connections.active ? 'No connection' : browser.bucketError ? 'Connection error' : 'Connected' }}</span>
-          <details class="tool-menu preferences">
-            <summary class="icon-button subtle" aria-label="View preferences" title="View preferences"><SlidersHorizontal :size="17" /></summary>
-            <div class="pop-menu"><button :aria-pressed="compact" @click="compact = !compact"><List :size="16" /> {{ compact ? 'Comfortable rows' : 'Compact rows' }}</button>
-              <button @click="openDemo"><CircleHelp :size="16" /> Explore the demo</button></div>
-          </details>
-        </div>
-        <WindowControls v-if="windowChrome === 'custom'" @error="startError = $event" />
-      </header>
+      </div>
       <Notice v-if="startError" tone="error">{{ startError }}</Notice>
 
       <div class="work-area">
         <FadeRegion>
-          <KeepAlive include="BrowserWorkspace">
-            <BrowserWorkspace v-if="activePage === 'Objects'" ref="browserView" :demo="demo" :compact="compact" @add="openEditor()" @demo="openDemo"
-              @create-bucket="creatingBucket = true" @tools="activePage = 'Tools'" @job="jobStarted" />
-            <ToolsWorkspace v-else-if="activePage === 'Tools'" :location="browser.location" :profiles="connections.profiles" :demo="demo" @job="showJob" />
-            <AdminWorkspace v-else-if="activePage === 'Administration'" :connection="connections.active" :bucket="browser.bucket" :demo="demo" />
-            <ActivityWorkspace v-else-if="activePage === 'Activity'" :demo="demo" :preselected="focusJob" @browse="activePage = 'Objects'" />
-            <ConnectionsWorkspace v-else @add="openEditor()" @edit="openEditor" @browse="activePage = 'Objects'" />
+          <KeepAlive include="BrowserWorkspace,ManagerWorkspace,ActivityWorkspace,ToolsWorkspace" :max="12">
+            <BrowserWorkspace v-if="route.workspace === 'browser'" key="browser" ref="browserView" :demo="demo" :compact="compact" @add="openEditor()"
+              @demo="openDemo" @create-bucket="creatingBucket = true" @tools="go({ workspace: 'manager', page: 'tools' })" @job="jobStarted" @navigate="openBucket" />
+            <ManagerWorkspace v-else-if="managerRoute && connections.active && (managerRoute.page === 'overview' || managerRoute.page === 'buckets')"
+              :key="`manager:${connections.contextKey}`" :profile="connections.active" :inventory="managerRoute.page === 'buckets'" :bucket="managerRoute.bucket"
+              :demo="demo" :browse-available="canBrowse" :compact="compact" @inventory="go({ workspace: 'manager', page: 'buckets' })"
+              @inspect="go({ workspace: 'manager', page: 'buckets', bucket: $event })" @browse="openBucket"
+              @tools="go({ workspace: 'manager', page: 'tools', bucket: $event })" @create="creatingBucket = true" @connections="go({ workspace: 'admin', page: 'connections' })" />
+            <AdminWorkspace v-else-if="route.workspace === 'cephAdmin' || managerRoute?.page === 'access'"
+              :key="`access:${route.workspace}:${connections.contextKey}`" :scope="route.workspace === 'cephAdmin' ? 'ceph' : 's3'"
+              :connection="connections.active" :bucket="browser.bucket" :demo="demo" />
+            <ToolsWorkspace v-else-if="managerRoute?.page === 'tools'" :key="`tools:${connections.contextKey}`" :location="toolsLocation"
+              :profiles="managerProfiles" :source-buckets="browser.buckets" :demo="demo" @job="showJob" @source="go({ workspace: 'manager', page: 'tools', bucket: $event })" />
+            <ActivityWorkspace v-else-if="route.workspace === 'admin' && route.page === 'activity'" key="activity" :demo="demo" :preselected="route.jobId ?? null"
+              @browse="canBrowse ? go({ workspace: 'browser' }) : canManage ? go({ workspace: 'manager', page: 'buckets' }) : go({ workspace: 'admin', page: 'connections' })" />
+            <WorkspacePreferences v-else-if="route.workspace === 'admin' && route.page === 'preferences'" v-model:compact="compact" v-model:show-tags="showTags"
+              v-model:startup="startup" :profiles="connections.profiles" />
+            <ConnectionsWorkspace v-else :has-draft="hasDraft" @add="openEditor()" @edit="openEditor" @browse="openProfile" @demo="openDemo" />
           </KeepAlive>
         </FadeRegion>
       </div>
       <footer class="app-status">
-        <span><span class="status-dot" :class="{ online: demo || (connections.active && !browser.bucketError && !browser.bucketLoading) }" />
-          {{ demo ? 'Sample data · Read-only' : connections.active?.endpoint || (connections.active ? 'AWS regional endpoint' : 'StoreForge desktop') }}</span>
-        <button v-if="jobs.active" class="subtle" @click="activePage = 'Activity'"><Activity :size="14" /> {{ jobs.active }} running</button>
+        <span><span class="status-dot" :class="{ online: demo || ((canBrowse || canManage) && !browser.bucketError && !browser.bucketLoading) }" />
+          {{ demo ? 'Sample data' : connections.active?.endpoint || (connections.active ? 'AWS regional endpoint' : 'StoreForge desktop') }}</span>
+        <button v-if="jobs.active && !demo" class="subtle" @click="go({ workspace: 'admin', page: 'activity' })"><Activity :size="14" /> {{ jobs.active }} running</button>
         <span v-else-if="connections.active">{{ connections.active.region }}<span class="separator">·</span>{{ connections.active.pathStyle ? 'Path style' : 'Virtual hosted' }}</span>
       </footer>
     </main>
   </div>
-  <ConnectionEditor v-if="editor" :profile="profile" @close="editor = false" @saved="connectionSaved" />
-  <NewBucketDialog v-if="creatingBucket" :connection="browser.location.connection" @close="creatingBucket = false" @created="bucketCreated" />
+  <ConnectionEditor v-if="editor" :profile="editedProfile" :resume="!editedProfile && hasDraft" @close="closeEditor" @saved="connectionSaved" />
+  <WorkspaceHelp v-if="help" :workspace="route.workspace" @close="help = false" />
+  <NewBucketDialog v-if="creatingBucket && connections.active && !demo" :connection="connections.active.id" @close="creatingBucket = false" @created="bucketCreated" />
 </template>

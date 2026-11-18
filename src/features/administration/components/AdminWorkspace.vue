@@ -12,7 +12,7 @@ import { administer } from '../api/administration'
 import { operations, type Operation } from '../model/operations'
 import AdminResponse from './AdminResponse.vue'
 
-const props = defineProps<{ connection?: Connection; bucket?: string; demo: boolean }>()
+const props = defineProps<{ connection?: Connection; bucket?: string; demo: boolean; scope: 's3' | 'ceph' }>()
 const group = ref('IAM users')
 const selected = ref('')
 const values = ref<Record<string, string>>({})
@@ -22,7 +22,9 @@ const response = ref<string>()
 const confirm = ref(false)
 let request = 0
 
-const available = computed(() => operations.filter(operation => props.demo || identityAvailable(props.connection, operationIdentity(operation))))
+const available = computed(() => operations.filter(operation =>
+  (props.scope === 'ceph') === (operation.protocol === 'rgw') &&
+  (props.demo || identityAvailable(props.connection, operationIdentity(operation)))))
 const groups = computed(() => Array.from(new Set(available.value.map(operation => operation.group))))
 const groupOperations = computed(() => available.value.filter(operation => operation.group === group.value))
 const actionOptions = computed(() => groupOperations.value.map(({ id, label }) => ({ value: id, label })))
@@ -30,10 +32,10 @@ const operation = computed(() => groupOperations.value.find(item => item.id === 
 const sampleAvailable = computed(() => props.demo && operation.value?.id === 'ceph-buckets-inspect-bucket-statistics')
 const valid = computed(() => !!operation.value && operation.value.fields.every(field => !field.required || values.value[field.key]?.trim()))
 
-watch(() => [props.connection?.id, props.connection?.revision], () => {
+watch(() => [props.connection?.id, props.connection?.revision, props.scope], () => {
   if (!groups.value.includes(group.value)) group.value = groups.value[0] ?? ''
   reset()
-})
+}, { immediate: true })
 
 watch(groupOperations, items => {
   selected.value = items[0]?.id ?? ''
@@ -92,7 +94,7 @@ async function execute(confirmed: boolean): Promise<void> {
 <template>
   <section class="workspace-page">
     <div class="page-header">
-      <div><h1>Administration</h1><p>Manage access, notification topics, and Ceph RGW resources.</p></div>
+      <div><h1>{{ scope === 'ceph' ? 'Ceph administration' : 'Access & topics' }}</h1><p>{{ scope === 'ceph' ? 'Manage RGW resources with the profile’s verified service identities.' : 'Manage IAM access and notification topics.' }}</p></div>
       <span v-if="connection" class="context-chip"><Server :size="16" />{{ connection.name }} · {{ providerNames[connection.provider] }}</span>
     </div>
     <EmptyState v-if="!connection" :icon="ShieldCheck" title="Select a connection" description="Administrative actions use the permissions of the selected connection." />

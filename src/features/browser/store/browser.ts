@@ -4,8 +4,19 @@ import { errorMessage } from '../../../common/tauri'
 import { bucketsApi } from '../../bucket/api/buckets'
 import type { Bucket } from '../../bucket/model/bucket'
 import { objectsApi } from '../api/objects'
-import { demoBuckets, demoKey, demoPrefix } from '../model/demo'
+import { demoKey, demoPrefix } from '../model/demo'
 import { objectId, type Location, type ObjectId, type ObjectRow } from '../model/objects'
+
+type BrowserTab = 'Objects' | 'Versions' | 'Settings'
+
+interface BrowserView {
+  filter: string
+  technical: boolean
+  recursive: boolean
+  selected: string[]
+  focus: ObjectId | null
+  tab: BrowserTab
+}
 
 export const useBrowser = defineStore('browser', () => {
   const connection = ref('')
@@ -21,7 +32,11 @@ export const useBrowser = defineStore('browser', () => {
   const error = ref('')
   const bucketError = ref('')
   const recursive = ref(false)
-  let connectionRequest = 0
+  const filter = ref('')
+  const technical = ref(false)
+  const tab = ref<BrowserTab>('Objects')
+  const views = new Map<string, BrowserView>()
+  let revision = ''
   let bucketRequest = 0
   let rowRequest = 0
 
@@ -42,30 +57,52 @@ export const useBrowser = defineStore('browser', () => {
     }
   }
 
-  async function changeConnection(id: string): Promise<void> {
-    const request = ++connectionRequest
+  async function changeConnection(id: string, contextRevision = ''): Promise<void> {
+    rememberView()
     bucketRequest++
     connection.value = id
+    revision = contextRevision
     buckets.value = []
-    bucketLoading.value = Boolean(id)
     bucketError.value = ''
-    await navigate('', '')
-    if (request !== connectionRequest) return
-    await loadBuckets(id)
-    if (request !== connectionRequest) return
-    if (id === 'demo') {
-      const demoBucket = demoBuckets[0]?.name ?? ''
-      await navigate(demoBucket, demoPrefix)
-      if (request === connectionRequest) focus.value = objectId(demoBucket, demoKey)
-    }
+    restoreView('', '')
+    await Promise.all([loadRows(), loadBuckets(id)])
   }
 
   async function navigate(name: string, path = ''): Promise<void> {
+    if (bucket.value === name && prefix.value === path) return
+    rememberView()
+    restoreView(name, path)
+    await loadRows()
+  }
+
+  function viewKey(name = bucket.value, path = prefix.value): string {
+    return JSON.stringify([connection.value, revision, name, path])
+  }
+
+  function rememberView(): void {
+    if (!connection.value || !bucket.value) return
+    const key = viewKey()
+    views.delete(key)
+    views.set(key, {
+      filter: filter.value, technical: technical.value, recursive: recursive.value,
+      selected: selected.value, focus: focus.value, tab: tab.value,
+    })
+    if (views.size > 80) {
+      const oldest = views.keys().next().value
+      if (oldest) views.delete(oldest)
+    }
+  }
+
+  function restoreView(name: string, path: string): void {
+    const previous = views.get(viewKey(name, path))
     bucket.value = name
     prefix.value = path
-    selected.value = []
-    focus.value = null
-    await loadRows()
+    filter.value = previous?.filter ?? ''
+    technical.value = previous?.technical ?? false
+    recursive.value = previous?.recursive ?? false
+    selected.value = previous?.selected ?? []
+    focus.value = previous ? previous.focus : connection.value === 'demo' && path === demoPrefix ? objectId(name, demoKey) : null
+    tab.value = previous?.tab ?? 'Objects'
   }
 
   async function loadRows(append = false): Promise<void> {
@@ -107,6 +144,6 @@ export const useBrowser = defineStore('browser', () => {
 
   return {
     buckets, bucket, prefix, rows, selected, selectedObjects, focus, cursor, loading, bucketLoading, error, bucketError,
-    location, recursive, loadBuckets, changeConnection, navigate, loadRows, toggleSelection, toggleVisible,
+    location, recursive, filter, technical, tab, loadBuckets, changeConnection, navigate, loadRows, toggleSelection, toggleVisible,
   }
 })

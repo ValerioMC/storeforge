@@ -12,6 +12,9 @@ export interface EndpointSettings {
   standardTags: string[]
   administrativeTags: string[]
   caCertificate: string
+  browserEnabled: boolean
+  managerEnabled: boolean
+  defaultWorkspace: Workspace | null
 }
 
 export interface ServiceIdentity {
@@ -97,7 +100,10 @@ export const capabilityNames: Record<CapabilityState, string> = {
 }
 
 export function endpointSettings(): EndpointSettings {
-  return { tenant: '', account: '', realm: '', defaultEndpoint: false, standardTags: [], administrativeTags: [], caCertificate: '' }
+  return {
+    tenant: '', account: '', realm: '', defaultEndpoint: false, standardTags: [], administrativeTags: [], caCertificate: '',
+    browserEnabled: true, managerEnabled: true, defaultWorkspace: null,
+  }
 }
 
 export function identityCapability(profile: Connection | undefined, identity: IdentityKind): CapabilityState {

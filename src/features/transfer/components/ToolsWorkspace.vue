@@ -17,8 +17,8 @@ import { transfersApi } from '../api/transfers'
 import type { Comparison, Integrity, Transfer, Usage } from '../model/transfer'
 import { useJobs } from '../store/jobs'
 
-const props = defineProps<{ location: Location; profiles: Connection[]; demo: boolean }>()
-const emit = defineEmits<{ job: [id: string] }>()
+const props = defineProps<{ location: Location; profiles: Connection[]; sourceBuckets: Bucket[]; demo: boolean }>()
+const emit = defineEmits<{ job: [id: string]; source: [bucket: string] }>()
 const jobs = useJobs()
 const options = [
   { name: 'Compare', icon: ArrowLeftRight },
@@ -50,6 +50,7 @@ const targetConnections = computed(() => [
   ...(props.demo ? [{ value: 'demo', label: 'Asteria Research (demo)' }] : []),
   ...props.profiles.map(profile => ({ value: profile.id, label: profile.name })),
 ])
+const sourceBucketOptions = computed(() => props.sourceBuckets.map(({ name }) => ({ value: name, label: name })))
 const targetBucketOptions = computed(() => targetBuckets.value.map(({ name }) => ({ value: name, label: name })))
 const target = computed<Location>(() => ({ connection: targetId.value, bucket: targetBucket.value, prefix: targetPrefix.value }))
 const sameLocation = computed(() => props.location.connection === target.value.connection && props.location.bucket === target.value.bucket && props.location.prefix === target.value.prefix)
@@ -61,11 +62,13 @@ let request = 0
 
 watch(() => props.location.connection, id => { targetId.value = id })
 watch(targetId, () => void loadTargetBuckets(), { immediate: true })
-watch([tab, () => props.location, target], () => resetResults())
+watch([tab, () => props.location, target], resetResults)
 
 function resetResults(): void {
   request++
   busy.value = false
+  confirm.value = undefined
+  aborting.value = undefined
   error.value = ''
   comparison.value = undefined
   usage.value = undefined
@@ -154,9 +157,13 @@ async function abort(): Promise<void> {
   <section class="workspace-page">
     <div class="page-header">
       <div><h1>Storage tools</h1><p>Compare, migrate, and maintain objects under a bucket or prefix.</p></div>
-      <span v-if="location.bucket" class="context-chip"><Database :size="16" /><code>{{ location.bucket }}/{{ location.prefix }}</code></span>
+      <div class="tools-source">
+        <label for="tools-source-bucket">Source bucket</label>
+        <AppSelect id="tools-source-bucket" :model-value="location.bucket" :options="sourceBucketOptions" placeholder="Select a bucket" @update:model-value="emit('source', $event)" />
+        <code v-if="location.prefix">{{ location.prefix }}</code>
+      </div>
     </div>
-    <EmptyState v-if="!location.bucket" :icon="Database" title="Select a source bucket" description="Choose a bucket from the sidebar. Open a folder in Objects to target a specific prefix." />
+    <EmptyState v-if="!location.bucket" :icon="Database" title="Select a source bucket" description="Choose a source above. To target one prefix, open it in Browser and launch the storage tools from the object list." />
     <template v-else>
       <Notice v-if="demo">Select a live connection to scan, migrate, or change objects.</Notice>
       <nav class="workspace-tabs tool-tabs" aria-label="Storage tools">
