@@ -24,6 +24,7 @@ let request = 0
 const available = computed(() => operations.filter(operation => operation.protocol !== 'rgw' || props.connection?.provider === 'ceph'))
 const groups = computed(() => Array.from(new Set(available.value.map(operation => operation.group))))
 const groupOperations = computed(() => available.value.filter(operation => operation.group === group.value))
+const actionOptions = computed(() => groupOperations.value.map(({ id, label }) => ({ value: id, label })))
 const operation = computed(() => groupOperations.value.find(item => item.id === selected.value))
 const sampleAvailable = computed(() => props.demo && operation.value?.id === 'ceph-buckets-inspect-bucket-statistics')
 const valid = computed(() => !!operation.value && operation.value.fields.every(field => !field.required || values.value[field.key]?.trim()))
@@ -102,7 +103,7 @@ async function execute(confirmed: boolean): Promise<void> {
               <div><h2>{{ group }}</h2><p>{{ operation?.protocol === 'rgw' ? 'Manage the selected gateway using its RGW Admin Ops API.' : 'Manage resources within the selected account.' }}</p></div>
               <span class="chip">{{ operation?.protocol.toUpperCase() }}</span>
             </div>
-            <label>Action<AppSelect v-model="selected" :disabled="busy"><option v-for="item in groupOperations" :key="item.id" :value="item.id">{{ item.label }}</option></AppSelect></label>
+            <label>Action<AppSelect v-model="selected" :options="actionOptions" :disabled="busy" /></label>
             <div v-if="operation?.fields.length" class="form-grid">
               <label v-for="field in operation.fields" :key="field.key" :class="{ 'span-two': field.multiline }">
                 {{ field.label }} <small v-if="!field.required">Optional</small>

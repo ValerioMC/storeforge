@@ -15,6 +15,10 @@ const search = ref('')
 const favoritesOnly = ref(false)
 const favorites = ref<string[]>(loadFavorites())
 
+const connectionOptions = computed(() => [
+  ...connections.profiles.map(profile => ({ value: profile.id, label: profile.name })),
+  { value: 'demo', label: 'Asteria Research' },
+])
 const buckets = computed(() => browser.buckets.filter(bucket =>
   bucket.name.toLowerCase().includes(search.value.toLowerCase()) && (!favoritesOnly.value || isFavorite(bucket.name))))
 const endpoint = computed(() => {
@@ -57,11 +61,9 @@ function selectConnection(value: string): void {
 
     <div class="connection-block">
       <label class="side-label" for="active-connection">Connection</label>
-      <AppSelect id="active-connection" class="connection-select" :model-value="connections.activeId" @update:model-value="selectConnection">
+      <AppSelect id="active-connection" tone="rail" :model-value="connections.activeId" :options="connectionOptions"
+        placeholder="Select a connection" @update:model-value="selectConnection">
         <template #leading><Server :size="17" /></template>
-        <option value="" disabled>Select a connection</option>
-        <option v-for="profile in connections.profiles" :key="profile.id" :value="profile.id">{{ profile.name }}</option>
-        <option value="demo">Asteria Research</option>
       </AppSelect>
       <div class="connection-caption"><span class="status-dot" :class="{ online: connections.active && !browser.bucketError && !browser.bucketLoading }" />{{ endpoint }}</div>
     </div>

@@ -19,6 +19,15 @@ const pending = ref<{ title: string; change: ObjectChange; description: string }
 const error = ref('')
 const result = ref('')
 let request = 0
+const aclOptions = [
+  { value: 'private', label: 'Private' },
+  { value: 'bucket-owner-full-control', label: 'Bucket owner full control' },
+  { value: 'bucket-owner-read', label: 'Bucket owner read' },
+  { value: 'authenticated-read', label: 'Authenticated read' },
+  { value: 'public-read', label: 'Public read' },
+]
+const retentionOptions = (['GOVERNANCE', 'COMPLIANCE'] as const).map(value => ({ value, label: value }))
+const retrievalOptions = ['Standard', 'Bulk', 'Expedited'].map(value => ({ value, label: value }))
 
 watch(() => [props.connection, props.object.key, props.object.versionId], () => void load(), { immediate: true })
 
@@ -68,7 +77,7 @@ async function apply(): Promise<void> {
       <h3>Access grants</h3>
       <ul v-if="grants?.length" class="grants"><li v-for="grant in grants" :key="grant"><code>{{ grant }}</code></li></ul>
       <p v-else-if="grants" class="muted">No grants returned.</p>
-      <label>Canned ACL<AppSelect v-model="acl" :disabled="demo"><option value="private">Private</option><option value="bucket-owner-full-control">Bucket owner full control</option><option value="bucket-owner-read">Bucket owner read</option><option value="authenticated-read">Authenticated read</option><option value="public-read">Public read</option></AppSelect></label>
+      <label>Canned ACL<AppSelect v-model="acl" :options="aclOptions" :disabled="demo" /></label>
       <button :disabled="demo" @click="pending = { title: 'Replace object ACL?', description: 'This replaces the current grants with the selected access policy.', change: { kind: 'setAcl', acl } }">Update ACL</button>
     </section>
     <section class="panel-form">
@@ -77,14 +86,14 @@ async function apply(): Promise<void> {
       <button :disabled="demo" @click="pending = { title: 'Change legal hold?', description: 'This updates the legal hold on the selected object version.', change: { kind: 'legalHold', enabled: details?.legalHold !== 'ON' } }">
         {{ details?.legalHold === 'ON' ? 'Remove legal hold' : 'Enable legal hold' }}
       </button>
-      <label>Retention<AppSelect v-model="mode" :disabled="demo"><option>GOVERNANCE</option><option>COMPLIANCE</option></AppSelect></label>
+      <label>Retention<AppSelect v-model="mode" :options="retentionOptions" :disabled="demo" /></label>
       <label>Retain until (local time)<input v-model="until" type="datetime-local" :disabled="demo" /></label>
       <button :disabled="demo || !until" @click="reviewRetention">Set retention</button>
     </section>
     <section class="panel-form">
       <h3>Archive restore</h3>
       <label>Days available<input v-model.number="days" type="number" min="1" :disabled="demo" /></label>
-      <label>Retrieval tier<AppSelect v-model="tier" :disabled="demo"><option>Standard</option><option>Bulk</option><option>Expedited</option></AppSelect></label>
+      <label>Retrieval tier<AppSelect v-model="tier" :options="retrievalOptions" :disabled="demo" /></label>
       <button :disabled="demo || days < 1" @click="pending = { title: 'Request archive restore?', description: 'The endpoint queues retrieval and may charge for the request.', change: { kind: 'restoreArchive', days, tier } }">Request restore</button>
     </section>
     <ConfirmDialog v-if="pending" :title="pending.title" :description="pending.description" action="Apply change" @close="pending = undefined" @confirm="apply" />

@@ -45,6 +45,11 @@ const usage = ref<Usage>()
 const integrity = ref<Integrity>()
 const multipart = ref<MultipartUpload[]>()
 const needsTarget = computed(() => tab.value === 'Compare' || tab.value === 'Migrate')
+const targetConnections = computed(() => [
+  ...(props.demo ? [{ value: 'demo', label: 'Asteria Research (demo)' }] : []),
+  ...props.profiles.map(profile => ({ value: profile.id, label: profile.name })),
+])
+const targetBucketOptions = computed(() => targetBuckets.value.map(({ name }) => ({ value: name, label: name })))
 const target = computed<Location>(() => ({ connection: targetId.value, bucket: targetBucket.value, prefix: targetPrefix.value }))
 const sameLocation = computed(() => props.location.connection === target.value.connection && props.location.bucket === target.value.bucket && props.location.prefix === target.value.prefix)
 const overlap = computed(() => props.location.connection === target.value.connection && props.location.bucket === target.value.bucket &&
@@ -82,6 +87,7 @@ async function loadTargetBuckets(): Promise<void> {
 }
 
 function review(): void {
+  if (needsTarget.value && !targetBucket.value) return
   if (tab.value === 'Migrate' || tab.value === 'Purge') confirm.value = tab.value
   else void run()
 }
@@ -170,8 +176,8 @@ async function abort(): Promise<void> {
             </div>
           </div>
           <div v-if="needsTarget" class="form-grid">
-            <label>Destination connection<AppSelect v-model="targetId"><option v-if="demo" value="demo">Asteria Research (demo)</option><option v-for="profile in profiles" :key="profile.id" :value="profile.id">{{ profile.name }}</option></AppSelect></label>
-            <label>Destination bucket<AppSelect v-model="targetBucket" required><option disabled value="">Choose a bucket</option><option v-for="bucket in targetBuckets" :key="bucket.name">{{ bucket.name }}</option></AppSelect></label>
+            <label>Destination connection<AppSelect v-model="targetId" :options="targetConnections" /></label>
+            <label>Destination bucket<AppSelect v-model="targetBucket" :options="targetBucketOptions" placeholder="Choose a bucket" required /></label>
             <label class="span-two">Destination prefix <small>Optional</small><input v-model="targetPrefix" placeholder="e.g. telemetry/" spellcheck="false" /></label>
           </div>
           <label v-if="tab === 'Migrate'" class="check-label"><input v-model="overwrite" type="checkbox" /> Overwrite existing destination objects</label>

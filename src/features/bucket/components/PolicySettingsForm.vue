@@ -15,6 +15,14 @@ const emit = defineEmits<{ change: [value: JsonValue] }>()
 
 const newKey = ref('')
 const newType = ref<JsonType>('Text')
+const typeOptions = (Object.keys(jsonDefaults) as JsonType[]).map(value => ({ value, label: value }))
+const effectOptions = computed(() => {
+  const effects = ['Allow', 'Deny'].map(value => ({ value, label: value }))
+  const value = props.value
+  return typeof value === 'string' && value && value !== 'Allow' && value !== 'Deny'
+    ? [{ value, label: value }, ...effects]
+    : effects
+})
 const object = computed(() => isObject(props.value) ? props.value : undefined)
 const list = computed(() => Array.isArray(props.value) ? props.value : undefined)
 const available = computed(() => Object.entries(policyFields(props.scope))
@@ -88,9 +96,7 @@ function updateInput(event: Event): void {
       <div v-if="!disabled && !scope" class="policy-add">
         <input v-model="newKey" type="text" aria-label="Field name" placeholder="Field name" spellcheck="false"
           @keydown.enter.prevent="addProperty" />
-        <AppSelect v-model="newType" aria-label="Field type">
-          <option v-for="(_, type) in jsonDefaults" :key="type">{{ type }}</option>
-        </AppSelect>
+        <AppSelect v-model="newType" :options="typeOptions" aria-label="Field type" />
         <button type="button" :disabled="!objectProperty" @click="addProperty">Add field</button>
       </div>
       <button v-if="!disabled && scope === 'statement' && field === 'Statement'" type="button" class="settings-add"
@@ -109,10 +115,8 @@ function updateInput(event: Event): void {
           @click="removeItem(index)"><Trash2 :size="15" /></button>
       </div>
       <div v-if="!disabled" class="panel-actions">
-        <select v-if="field !== 'Statement' && !['Action', 'NotAction', 'Resource', 'NotResource'].includes(field ?? '')"
-          v-model="newType" aria-label="Value type">
-          <option v-for="(_, type) in jsonDefaults" :key="type">{{ type }}</option>
-        </select>
+        <AppSelect v-if="field !== 'Statement' && !['Action', 'NotAction', 'Resource', 'NotResource'].includes(field ?? '')"
+          v-model="newType" :options="typeOptions" aria-label="Value type" />
         <button type="button" class="settings-add" @click="addItem">
           <Plus :size="14" /> {{ field === 'Statement' ? 'Add statement' : 'Add value' }}
         </button>
@@ -123,12 +127,8 @@ function updateInput(event: Event): void {
     </label>
     <label v-else>
       {{ title }}
-      <AppSelect v-if="field === 'Effect' && typeof value === 'string'" :model-value="value" :disabled="disabled"
-        @update:model-value="emit('change', $event)">
-        <option v-if="!['Allow', 'Deny'].includes(value)" :value="value">{{ value || 'Select an effect' }}</option>
-        <option>Allow</option>
-        <option>Deny</option>
-      </AppSelect>
+      <AppSelect v-if="field === 'Effect' && typeof value === 'string'" :model-value="value" :options="effectOptions"
+        placeholder="Select an effect" :disabled="disabled" @update:model-value="emit('change', $event)" />
       <input v-else :value="value ?? 'null'" :type="typeof value === 'number' ? 'number' : 'text'"
         :step="typeof value === 'number' ? 'any' : undefined" :disabled="disabled || value === null"
         spellcheck="false" @input="updateInput" />

@@ -25,6 +25,11 @@ const reveal = ref(false)
 const busy = ref<'test' | 'save' | null>(null)
 const result = ref('')
 const error = ref('')
+const providerOptions = (Object.keys(providerNames) as Provider[]).map(value => ({ value, label: providerNames[value] }))
+const addressingOptions = [
+  { value: true, label: 'Path style' },
+  { value: false, label: 'Virtual hosted' },
+]
 const updatesCredentials = computed(() => !props.profile || Boolean(accessKey.value || secretKey.value || sessionToken.value))
 const valid = computed(() => Boolean(name.value.trim() && region.value.trim() && (endpoint.value.trim() || provider.value === 'aws') &&
   (!updatesCredentials.value || (accessKey.value.trim() && secretKey.value.trim()))))
@@ -66,10 +71,10 @@ async function run(action: 'test' | 'save'): Promise<void> {
     <form class="modal-form" @submit.prevent="run('save')">
       <div class="form-grid">
         <label>Connection name<input v-model="name" placeholder="e.g. Production RGW" required autofocus /></label>
-        <label>Provider<AppSelect v-model="provider"><option v-for="(label, value) in providerNames" :key="value" :value="value">{{ label }}</option></AppSelect></label>
+        <label>Provider<AppSelect v-model="provider" :options="providerOptions" /></label>
         <label class="span-two">Endpoint URL<input v-model="endpoint" type="url" :required="provider !== 'aws'" :placeholder="provider === 'aws' ? 'Use the AWS endpoint for this region' : 'https://storage.example.com'" /></label>
         <label>Signing region<input v-model="region" required spellcheck="false" /></label>
-        <label>Addressing<AppSelect v-model="pathStyle"><option :value="true">Path style</option><option :value="false">Virtual hosted</option></AppSelect></label>
+        <label>Addressing<AppSelect v-model="pathStyle" :options="addressingOptions" /></label>
       </div>
       <fieldset>
         <legend>Credentials</legend>

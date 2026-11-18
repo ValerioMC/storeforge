@@ -18,6 +18,14 @@ function values(field: XmlField, children: Element[]): (Element | undefined)[] {
   return field.multiple ? children : [children[0]]
 }
 
+function selectOptions(field: XmlValueField, child?: Element): { value: string; label: string }[] {
+  const current = xmlValue(props.parent, field, child)
+  const options = (field.options ?? []).map(value => ({ value, label: value }))
+  if (current && !field.options?.includes(current)) options.unshift({ value: current, label: current })
+  if (!field.empty) options.unshift({ value: '', label: 'Not set' })
+  return options
+}
+
 function add(field: XmlField): void {
   addXmlField(props.parent, field)
   emit('change')
@@ -62,14 +70,9 @@ function updateInput(field: XmlValueField, event: Event, child?: Element): void 
           </label>
           <label v-else>
             {{ field.label }}
-            <AppSelect v-if="field.kind === 'select'" :model-value="xmlValue(parent, field, child)" :disabled="disabled"
-              @update:model-value="update(field, $event, child)">
-              <option value="" :disabled="!!field.empty">{{ field.empty ?? 'Not set' }}</option>
-              <option v-if="xmlValue(parent, field, child) && !field.options?.includes(xmlValue(parent, field, child))">
-                {{ xmlValue(parent, field, child) }}
-              </option>
-              <option v-for="option in field.options" :key="option">{{ option }}</option>
-            </AppSelect>
+            <AppSelect v-if="field.kind === 'select'" :model-value="xmlValue(parent, field, child)"
+              :options="selectOptions(field, child)" :placeholder="field.empty" :disabled="disabled"
+              @update:model-value="update(field, $event, child)" />
             <input v-else :type="field.kind" :value="xmlValue(parent, field, child)" :disabled="disabled"
               :min="field.kind === 'number' ? 0 : undefined" spellcheck="false" @input="updateInput(field, $event, child)" />
           </label>

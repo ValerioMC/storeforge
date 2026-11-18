@@ -40,7 +40,7 @@ h1 { font-size: clamp(30px, 3.2vw, 42px); font-weight: 710; line-height: 1.1; le
 h2 { font-size: 21px; font-weight: 680; letter-spacing: -.022em; line-height: 1.2; }
 h3 { font-size: 14px; font-weight: 680; }
 p { overflow-wrap: anywhere; }
-button, input, select, textarea, summary { font: inherit; }
+button, input, textarea, summary { font: inherit; }
 button, .icon-button, .tool-menu > summary {
   display: inline-flex; justify-content: center; align-items: center; gap: 7px; min-height: 34px; padding: 6px 11px;
   color: var(--ink); border: 1px solid var(--line-strong); background: var(--surface); border-radius: var(--radius);
@@ -51,23 +51,55 @@ button:active:not(:disabled) { background-color: var(--selected); }
 button:disabled { cursor: default; opacity: .54; }
 button svg, summary svg, label svg, .inline svg, .notice svg { flex-shrink: 0; }
 :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-input, select, textarea { min-width: 0; color: var(--ink); caret-color: var(--accent); }
-input:not([type=checkbox]), select, textarea {
+input, textarea { min-width: 0; color: var(--ink); caret-color: var(--accent); }
+input:not([type=checkbox]), textarea {
   min-height: var(--field-height); padding: 7px 10px; border: 1px solid var(--line-strong); background: var(--surface); border-radius: var(--radius);
   font-size: 13px; font-weight: 500;
 }
-.select-field { display: block; position: relative; min-width: 0; }
-.select-field select { display: block; width: 100%; height: var(--field-height); padding: 0 32px 0 10px; appearance: none; cursor: pointer; text-overflow: ellipsis; }
-.select-field select:disabled { cursor: default; }
-.select-chevron, .select-leading { position: absolute; top: 50%; transform: translateY(-50%); pointer-events: none; }
-.select-chevron { right: 10px; color: var(--muted); }
-.select-leading { left: 9px; display: flex; }
-.select-field-with-icon select { padding-left: 33px; }
+.select-field { display: block; min-width: 0; }
+.select-field .select-trigger {
+  display: flex; justify-content: flex-start; width: 100%; height: var(--field-height); min-height: var(--field-height);
+  padding: 0 10px; text-align: left; font-size: 13px; font-weight: 500;
+  color: var(--select-ink, var(--ink)); background: var(--select-surface, var(--surface));
+  border-color: var(--select-border, var(--line-strong));
+}
+.select-field .select-trigger:hover:not(:disabled) {
+  color: var(--select-ink, var(--ink)); background: var(--select-hover, var(--surface-alt));
+  border-color: var(--select-border, #a4bac9);
+}
+.select-field .select-trigger[aria-expanded="true"]:not(:disabled) { border-color: var(--select-accent, var(--accent)); }
+.select-trigger:disabled { opacity: .65; }
+.select-value { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.select-chevron, .select-placeholder { color: var(--select-muted, var(--muted)); }
+.select-leading { display: flex; color: var(--select-accent, var(--accent)); }
+.select-list {
+  position: fixed; z-index: 10; overflow-y: auto; padding: 4px; overscroll-behavior: contain;
+  color: var(--select-ink, var(--ink)); background: var(--select-surface, var(--surface));
+  border: 1px solid var(--select-border, var(--line-strong)); border-radius: var(--radius); box-shadow: var(--shadow);
+  font-size: 13px; line-height: 1.3;
+}
+.select-option {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 31px; padding: 5px 8px;
+  border-radius: 4px; overflow-wrap: anywhere; cursor: pointer;
+}
+.select-option[aria-selected="true"] { color: var(--select-accent, var(--accent-deep)); font-weight: 650; }
+.select-option-active { background: var(--select-active, var(--selected)); }
+.select-check { flex-shrink: 0; }
+.select-rail {
+  --select-ink: var(--rail-ink);
+  --select-muted: var(--rail-muted);
+  --select-accent: var(--signal);
+  --select-surface: #142e44;
+  --select-border: #355369;
+  --select-hover: #1d384e;
+  --select-active: #153f58;
+}
+.select-rail .select-trigger { font-weight: 650; }
 input::placeholder, textarea::placeholder { color: var(--muted); opacity: 1; }
 input[type=checkbox] { width: 15px; height: 15px; margin: 0; accent-color: var(--accent); cursor: pointer; vertical-align: middle; }
 input[type=checkbox]:disabled { cursor: default; }
 textarea { width: 100%; resize: vertical; font-family: var(--mono); line-height: 1.5; }
-input:disabled, select:disabled, textarea:disabled { opacity: .65; }
+input:disabled, textarea:disabled { opacity: .65; }
 label { display: grid; gap: 6px; min-width: 0; font-size: 12.5px; font-weight: 640; }
 label small { color: var(--muted); font-size: 11.5px; font-weight: 500; }
 code, pre, kbd { font-family: var(--mono); overflow-wrap: anywhere; }
@@ -130,11 +162,6 @@ a { color: var(--accent-deep); text-underline-offset: .18em; }
 .brand strong { font-weight: 710; }
 .connection-block { padding: 8px 6px 18px; }
 .side-label { font-size: 11px; color: var(--rail-muted); font-weight: 670; margin-bottom: 7px; }
-.connection-select { color: var(--rail-ink); }
-.connection-select select { color: inherit; background: #142e44; border-color: #355369; font-weight: 650; }
-.connection-select option { background: var(--navy); color: var(--rail-ink); }
-.connection-select .select-leading { color: var(--signal); }
-.connection-select .select-chevron { color: var(--rail-muted); }
 .connection-caption { margin: 8px 0 0; color: var(--rail-muted); font-size: 11px; display: flex; align-items: center; gap: 6px; }
 .connection-caption .status-dot.online { background: #70dfbe; }
 .sidebar-section { display: flex; flex-direction: column; min-height: 0; flex: 1; border-top: 1px solid var(--rail-rule); padding-top: 15px; }
@@ -335,6 +362,7 @@ button.active .tab-count { background: #dceff6; color: var(--accent-deep); }
 .policy-fields, .policy-list { display: grid; gap: 8px; overflow-wrap: anywhere; }
 .policy-add { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
 .policy-add input { flex: 1 1 135px; max-width: 100%; }
+.policy-add > button, .select-field + .settings-add, .settings-input-row > .icon-button { min-height: var(--field-height); }
 .admin-body .stage-heading, .tools-panel .stage-heading { padding: 0; }
 .response-panel { margin-top: 18px; }
 .response-header { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 5px; }
