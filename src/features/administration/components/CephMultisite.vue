@@ -70,7 +70,7 @@ function openJournal(gateway: string, bucket: BucketIdentity, generation: string
     </Notice>
     <template v-if="topology && period">
       <WorkspaceTabs v-model="tab" :tabs="tabs" label="Multisite views" />
-      <div class="multisite-stack">
+      <div class="fade-stack">
         <FadeRegion>
           <div v-show="tab === 'topology'" class="multisite-stack"><CephTopology :topology="topology" :period="period" :endpoints="endpoints" /></div>
         </FadeRegion>

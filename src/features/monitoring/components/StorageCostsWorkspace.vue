@@ -227,87 +227,91 @@ function endpointName(id: string): string {
       </div>
       <Notice v-if="monthError && showFilters" tone="error">{{ monthError }}</Notice>
       <template v-if="report && loadedMonth === reportMonth">
-        <CostSettingsPanel v-show="tab === 'settings'" :settings="report.settings" :endpoints="report.endpoints" :busy="!!busy" @save="save" @collection="tab = 'collection'" />
-        <FadeRegion v-if="tab !== 'settings'">
-          <div :key="tab" class="cost-stack cost-tab-content">
-            <template v-if="tab === 'overview'">
-              <WorkspacePanel title="Estimated cost" :description="!rows.length ? 'No measurements match these filters.' : accounted.some(row => row.partial) ? 'Partial coverage · estimates use available readings' : 'Based on stored daily measurements'">
-                <dl class="cost-breakdown cost-period cost-portfolio-period">
-                  <div><dt>{{ month }}</dt><dd>{{ formatCost(totals.total, currency) }}</dd></div>
-                  <div><dt>{{ previousMonth }}</dt><dd>{{ formatCost(previousTotal, currency) }}</dd></div>
-                  <div><dt>Month over month</dt><dd>{{ delta != null && delta > 0 ? '+' : '' }}{{ formatCost(delta, currency) }}</dd></div>
-                </dl>
-                <CostBreakdown class="cost-secondary-breakdown" :totals="totals" :currency="currency" />
-                <p v-if="rows.length > accounted.length" class="cost-help cost-inset">Portfolio totals count accounts once and show their users separately in Subjects.</p>
-                <p v-if="!report.settings.rates && !Object.keys(report.settings.overrides).length" class="cost-help cost-inset">Set rates in Cost settings to calculate estimates.</p>
-              </WorkspacePanel>
-              <div class="cost-overview-grid">
-                <CostTrend :series="series" :currency="currency" />
-                <WorkspacePanel title="Top subjects" :description="ranked.fraction == null ? 'Ranked by estimated cost' : `Top 10 share · ${ranked.fraction.toLocaleString(undefined, { style: 'percent', maximumFractionDigits: 1 })}`">
-                  <ol v-if="ranked.rows.length" class="cost-rank">
-                    <li v-for="row in ranked.rows" :key="row.key">
-                      <button type="button" class="subtle" :data-cost-subject="row.key" @click="inspect(row)"><span>{{ row.name }} <small>{{ row.endpoint }}</small></span><strong>{{ formatCost(row.total, currency) }}</strong><ArrowUpRight :size="14" /></button>
-                    </li>
-                  </ol>
-                  <p v-else class="workspace-panel-message">No priced subjects match these filters.</p>
+        <div class="fade-stack">
+          <FadeRegion>
+            <CostSettingsPanel v-show="tab === 'settings'" :settings="report.settings" :endpoints="report.endpoints" :busy="!!busy" @save="save" @collection="tab = 'collection'" />
+          </FadeRegion>
+          <FadeRegion>
+            <div v-if="tab !== 'settings'" :key="tab" class="cost-stack cost-tab-content">
+              <template v-if="tab === 'overview'">
+                <WorkspacePanel title="Estimated cost" :description="!rows.length ? 'No measurements match these filters.' : accounted.some(row => row.partial) ? 'Partial coverage · estimates use available readings' : 'Based on stored daily measurements'">
+                  <dl class="cost-breakdown cost-period cost-portfolio-period">
+                    <div><dt>{{ month }}</dt><dd>{{ formatCost(totals.total, currency) }}</dd></div>
+                    <div><dt>{{ previousMonth }}</dt><dd>{{ formatCost(previousTotal, currency) }}</dd></div>
+                    <div><dt>Month over month</dt><dd>{{ delta != null && delta > 0 ? '+' : '' }}{{ formatCost(delta, currency) }}</dd></div>
+                  </dl>
+                  <CostBreakdown class="cost-secondary-breakdown" :totals="totals" :currency="currency" />
+                  <p v-if="rows.length > accounted.length" class="cost-help cost-inset">Portfolio totals count accounts once and show their users separately in Subjects.</p>
+                  <p v-if="!report.settings.rates && !Object.keys(report.settings.overrides).length" class="cost-help cost-inset">Set rates in Cost settings to calculate estimates.</p>
                 </WorkspacePanel>
-              </div>
-            </template>
-            <WorkspacePanel v-else-if="tab === 'subjects'" title="Subjects" :description="`${rows.length} matching ${rows.length === 1 ? 'subject' : 'subjects'}`">
-              <template #actions><button type="button" :disabled="!rows.length || !!busy" @click="download"><Download :size="15" /> Export CSV</button></template>
-              <p v-if="visible.length" class="cost-table-hint">Scroll across the table for traffic and coverage.</p>
-              <div v-if="visible.length" class="workspace-table cost-table cost-subject-table" tabindex="0" role="region" aria-label="Cost subjects">
-                <table>
-                  <thead><tr>
-                    <th v-for="column in columns" :key="column.key" scope="col"
-                      :aria-sort="sort === column.key ? descending ? 'descending' : 'ascending' : undefined">
-                      <button type="button" class="subtle" @click="changeSort(column.key)">{{ column.label }}
-                        <component :is="descending ? ArrowDown : ArrowUp" v-if="sort === column.key" :size="13" />
-                      </button>
-                    </th>
-                    <th scope="col">Complete days</th>
-                  </tr></thead>
-                  <tbody>
-                    <tr v-for="row in visible" :key="row.key">
-                      <th scope="row"><button type="button" class="subtle cost-subject" :data-cost-subject="row.key" @click="inspect(row)"><span>{{ row.name }}<small>{{ row.subject.kind === 'account' ? 'Account' : 'User' }} · {{ subjectLabel(row.subject) }}</small></span><ArrowUpRight :size="14" /></button></th>
-                      <td>{{ row.endpoint }}</td>
-                      <td>{{ formatCost(row.total, currency) }}</td>
-                      <td>{{ formatSize(row.usage.storage) }}</td>
-                      <td>{{ formatSize(row.usage.ingress) }}</td>
-                      <td>{{ formatSize(row.usage.egress) }}</td>
-                      <td>{{ formatCount(row.usage.requests) }}</td>
-                      <td>{{ row.storageDays }}/{{ row.daysInMonth }} storage<br />{{ row.trafficDays }}/{{ row.daysInMonth }} traffic</td>
-                    </tr>
-                  </tbody>
-                </table>
-              </div>
-              <p v-else class="workspace-panel-message">No cost measurements match these filters.</p>
-              <div v-if="pageCount > 1" class="cost-pagination"><span>Page {{ page + 1 }} of {{ pageCount }}</span>
-                <QueryPager :busy="loading" :previous="page > 0" :next="page + 1 < pageCount" @previous="page--" @next="page++" />
-              </div>
-            </WorkspacePanel>
-            <WorkspacePanel v-else title="Collect a UTC day" description="Storage snapshots use today’s UTC date. Traffic can be collected for earlier days.">
-              <form class="cost-controls cost-inset" @submit.prevent="runCollection">
-                <label>Collection day <input v-model="day" type="date" :max="today" :disabled="!!busy" required /></label>
-                <label>Endpoint <AppSelect v-model="collectionEndpoint" :options="options" :disabled="!!busy" aria-label="Collection endpoint" /></label>
-                <button class="primary" type="submit" :disabled="!!busy || !canCollect"><Database :size="15" /> {{ busy === 'collect' ? 'Collecting…' : 'Collect daily costs' }}</button>
-              </form>
-              <p v-if="!report.endpoints.length" class="cost-help cost-inset">Add a Ceph connection with verified Admin Ops access and register its RGW accounts or users.</p>
-              <div v-if="collection" class="cost-collection" aria-live="polite">
-                <p>{{ collection.day }} · {{ collection.subjects }} subjects · {{ collection.storageRecords }} storage readings · {{ collection.trafficRecords }} traffic readings</p>
-                <details v-if="collection.failures.length" open>
-                  <summary>{{ collection.failures.length }} incomplete or unavailable sources</summary>
-                  <ul>
-                    <li v-for="(failure, index) in collection.failures" :key="index">
-                      <strong>{{ endpointName(failure.endpointId) }}{{ failure.subject ? ` · ${subjectLabel(failure.subject)}` : '' }} · {{ failure.source }}</strong>
-                      <span>{{ failure.detail }}</span>
-                    </li>
-                  </ul>
-                </details>
-              </div>
-            </WorkspacePanel>
-          </div>
-        </FadeRegion>
+                <div class="cost-overview-grid">
+                  <CostTrend :series="series" :currency="currency" />
+                  <WorkspacePanel title="Top subjects" :description="ranked.fraction == null ? 'Ranked by estimated cost' : `Top 10 share · ${ranked.fraction.toLocaleString(undefined, { style: 'percent', maximumFractionDigits: 1 })}`">
+                    <ol v-if="ranked.rows.length" class="cost-rank">
+                      <li v-for="row in ranked.rows" :key="row.key">
+                        <button type="button" class="subtle" :data-cost-subject="row.key" @click="inspect(row)"><span>{{ row.name }} <small>{{ row.endpoint }}</small></span><strong>{{ formatCost(row.total, currency) }}</strong><ArrowUpRight :size="14" /></button>
+                      </li>
+                    </ol>
+                    <p v-else class="workspace-panel-message">No priced subjects match these filters.</p>
+                  </WorkspacePanel>
+                </div>
+              </template>
+              <WorkspacePanel v-else-if="tab === 'subjects'" title="Subjects" :description="`${rows.length} matching ${rows.length === 1 ? 'subject' : 'subjects'}`">
+                <template #actions><button type="button" :disabled="!rows.length || !!busy" @click="download"><Download :size="15" /> Export CSV</button></template>
+                <p v-if="visible.length" class="cost-table-hint">Scroll across the table for traffic and coverage.</p>
+                <div v-if="visible.length" class="workspace-table cost-table cost-subject-table" tabindex="0" role="region" aria-label="Cost subjects">
+                  <table>
+                    <thead><tr>
+                      <th v-for="column in columns" :key="column.key" scope="col"
+                        :aria-sort="sort === column.key ? descending ? 'descending' : 'ascending' : undefined">
+                        <button type="button" class="subtle" @click="changeSort(column.key)">{{ column.label }}
+                          <component :is="descending ? ArrowDown : ArrowUp" v-if="sort === column.key" :size="13" />
+                        </button>
+                      </th>
+                      <th scope="col">Complete days</th>
+                    </tr></thead>
+                    <tbody>
+                      <tr v-for="row in visible" :key="row.key">
+                        <th scope="row"><button type="button" class="subtle cost-subject" :data-cost-subject="row.key" @click="inspect(row)"><span>{{ row.name }}<small>{{ row.subject.kind === 'account' ? 'Account' : 'User' }} · {{ subjectLabel(row.subject) }}</small></span><ArrowUpRight :size="14" /></button></th>
+                        <td>{{ row.endpoint }}</td>
+                        <td>{{ formatCost(row.total, currency) }}</td>
+                        <td>{{ formatSize(row.usage.storage) }}</td>
+                        <td>{{ formatSize(row.usage.ingress) }}</td>
+                        <td>{{ formatSize(row.usage.egress) }}</td>
+                        <td>{{ formatCount(row.usage.requests) }}</td>
+                        <td>{{ row.storageDays }}/{{ row.daysInMonth }} storage<br />{{ row.trafficDays }}/{{ row.daysInMonth }} traffic</td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+                <p v-else class="workspace-panel-message">No cost measurements match these filters.</p>
+                <div v-if="pageCount > 1" class="cost-pagination"><span>Page {{ page + 1 }} of {{ pageCount }}</span>
+                  <QueryPager :busy="loading" :previous="page > 0" :next="page + 1 < pageCount" @previous="page--" @next="page++" />
+                </div>
+              </WorkspacePanel>
+              <WorkspacePanel v-else title="Collect a UTC day" description="Storage snapshots use today’s UTC date. Traffic can be collected for earlier days.">
+                <form class="cost-controls cost-inset" @submit.prevent="runCollection">
+                  <label>Collection day <input v-model="day" type="date" :max="today" :disabled="!!busy" required /></label>
+                  <label>Endpoint <AppSelect v-model="collectionEndpoint" :options="options" :disabled="!!busy" aria-label="Collection endpoint" /></label>
+                  <button class="primary" type="submit" :disabled="!!busy || !canCollect"><Database :size="15" /> {{ busy === 'collect' ? 'Collecting…' : 'Collect daily costs' }}</button>
+                </form>
+                <p v-if="!report.endpoints.length" class="cost-help cost-inset">Add a Ceph connection with verified Admin Ops access and register its RGW accounts or users.</p>
+                <div v-if="collection" class="cost-collection" aria-live="polite">
+                  <p>{{ collection.day }} · {{ collection.subjects }} subjects · {{ collection.storageRecords }} storage readings · {{ collection.trafficRecords }} traffic readings</p>
+                  <details v-if="collection.failures.length" open>
+                    <summary>{{ collection.failures.length }} incomplete or unavailable sources</summary>
+                    <ul>
+                      <li v-for="(failure, index) in collection.failures" :key="index">
+                        <strong>{{ endpointName(failure.endpointId) }}{{ failure.subject ? ` · ${subjectLabel(failure.subject)}` : '' }} · {{ failure.source }}</strong>
+                        <span>{{ failure.detail }}</span>
+                      </li>
+                    </ul>
+                  </details>
+                </div>
+              </WorkspacePanel>
+            </div>
+          </FadeRegion>
+        </div>
       </template>
     </template>
   </section>

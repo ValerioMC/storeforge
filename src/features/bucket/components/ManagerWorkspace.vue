@@ -96,38 +96,40 @@ defineExpose({ dirty, busy, discard })
     <FadeRegion>
       <WorkspaceDrawer v-if="bucket" :key="bucket" title="Bucket details" @close="emit('inventory')">
         <WorkspaceTabs v-model="bucketTab" label="Bucket detail" :tabs="bucketTabs" />
-        <FadeRegion>
-          <div v-show="bucketTab === 'overview'" class="workspace-drawer-content">
-            <dl class="setup-summary">
-              <div><dt>Connection</dt><dd>{{ profile.name }}</dd></div>
-              <div><dt>Endpoint region</dt><dd>{{ profile.region }}</dd></div>
-              <div><dt>Created</dt><dd>{{ formatDate(openBucket?.createdAt) }}</dd></div>
-              <div><dt>Current storage</dt><dd>{{ formatSize(sample?.usage.value?.currentBytes) }}</dd></div>
-              <div><dt>Objects</dt><dd>{{ formatCount(sample?.usage.value?.currentObjects) }}</dd></div>
-            </dl>
-            <div class="workspace-actions drawer-actions">
-              <button v-if="browseAvailable" @click="bucketTab = 'objects'">Browse objects here</button>
-              <button @click="emit('tools', bucket)">Open storage tools</button>
+        <div class="fade-stack">
+          <FadeRegion>
+            <div v-show="bucketTab === 'overview'" class="workspace-drawer-content">
+              <dl class="setup-summary">
+                <div><dt>Connection</dt><dd>{{ profile.name }}</dd></div>
+                <div><dt>Endpoint region</dt><dd>{{ profile.region }}</dd></div>
+                <div><dt>Created</dt><dd>{{ formatDate(openBucket?.createdAt) }}</dd></div>
+                <div><dt>Current storage</dt><dd>{{ formatSize(sample?.usage.value?.currentBytes) }}</dd></div>
+                <div><dt>Objects</dt><dd>{{ formatCount(sample?.usage.value?.currentObjects) }}</dd></div>
+              </dl>
+              <div class="workspace-actions drawer-actions">
+                <button v-if="browseAvailable" @click="bucketTab = 'objects'">Browse objects here</button>
+                <button @click="emit('tools', bucket)">Open storage tools</button>
+              </div>
             </div>
-          </div>
-        </FadeRegion>
-        <FadeRegion>
-          <BrowserWorkspace v-if="bucketTab === 'objects' && embedded" :embedded="embedded" :demo="demo" :compact="true" @job="emit('job', $event)" />
-        </FadeRegion>
-        <FadeRegion>
-          <div v-if="bucketTab === 'usage'">
-            <Notice v-if="error" tone="error">{{ error }}</Notice>
-            <BucketUsage :sample="sample" :pending="!!pending" :stale="!!monitoring?.stale" :demo="demo" @collect="run('collect')" />
-          </div>
-        </FadeRegion>
-        <FadeRegion>
-          <BucketSettings v-if="settingsVisited" v-show="bucketTab === 'configuration'" ref="settings" :connection="profile.id"
-            :bucket="bucket" :demo="demo" :notification-topic="notificationTopic" managed @removed="bucketRemoved" @changed="changed" />
-        </FadeRegion>
-        <FadeRegion>
-          <BucketQuota v-if="quotaAvailable" v-show="bucketTab === 'quota'" ref="quota" :profile="profile"
-            :bucket="bucket" :active="bucketTab === 'quota'" @changed="run('cached')" />
-        </FadeRegion>
+          </FadeRegion>
+          <FadeRegion>
+            <BrowserWorkspace v-if="bucketTab === 'objects' && embedded" :embedded="embedded" :demo="demo" :compact="true" @job="emit('job', $event)" />
+          </FadeRegion>
+          <FadeRegion>
+            <div v-if="bucketTab === 'usage'">
+              <Notice v-if="error" tone="error">{{ error }}</Notice>
+              <BucketUsage :sample="sample" :pending="!!pending" :stale="!!monitoring?.stale" :demo="demo" @collect="run('collect')" />
+            </div>
+          </FadeRegion>
+          <FadeRegion>
+            <BucketSettings v-if="settingsVisited" v-show="bucketTab === 'configuration'" ref="settings" :connection="profile.id"
+              :bucket="bucket" :demo="demo" :notification-topic="notificationTopic" managed @removed="bucketRemoved" @changed="changed" />
+          </FadeRegion>
+          <FadeRegion>
+            <BucketQuota v-if="quotaAvailable" v-show="bucketTab === 'quota'" ref="quota" :profile="profile"
+              :bucket="bucket" :active="bucketTab === 'quota'" @changed="run('cached')" />
+          </FadeRegion>
+        </div>
       </WorkspaceDrawer>
     </FadeRegion>
   </section>
@@ -151,7 +153,7 @@ defineExpose({ dirty, busy, discard })
 .lifecycle-quick-actions { display: grid; gap: 6px; padding: 9px 11px; border: 1px solid var(--line); border-radius: 7px; }
 .lifecycle-quick-actions > div { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .manager-workspace .bucket-configuration .configuration-grid { grid-template-columns: minmax(190px, 24%) minmax(0, 1fr); }
-.manager-workspace .workspace-drawer > .workspace-drawer-content > .setup-summary { margin: 12px 14px 0; }
+.manager-workspace .workspace-drawer-content > .setup-summary { margin: 4px 14px 0; }
 .manager-workspace .workspace-tabs { flex-wrap: wrap; }
 @media (max-width: 770px) {
   .manager-workspace .bucket-configuration .configuration-grid { grid-template-columns: minmax(0, 1fr); }

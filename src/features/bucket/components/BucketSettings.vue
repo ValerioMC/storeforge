@@ -220,31 +220,33 @@ defineExpose({
           <Notice v-if="state.error || operationError" tone="error">{{ state.error || operationError }}</Notice>
           <Notice v-if="state.unsupportedAction">{{ unsupportedConfigurationMessages[state.unsupportedAction] }}</Notice>
           <Notice v-if="state.notice || operationNotice" tone="info">{{ state.notice || operationNotice }}</Notice>
-          <p v-if="!state.reading && state.busy" class="muted" role="status">Reading endpoint configuration…</p>
-          <div v-else-if="readUnsupported && state.draft !== state.original" class="panel-actions configuration-actions">
-            <button type="button" :disabled="state.busy" @click="edit(state.original)">Discard draft</button>
-          </div>
-          <form v-else-if="!readUnsupported" class="panel-form" :aria-busy="state.busy" @submit.prevent="confirm = 'write'">
-            <div v-if="managed && lifecycleRules.length" class="lifecycle-quick-actions">
-              <div v-for="(rule, index) in lifecycleRules" :key="index">
-                <span>{{ rule.name }} <small class="muted">{{ rule.status }}</small></span>
-                <button v-if="rule.status === 'Enabled' || rule.status === 'Disabled'" type="button" :disabled="state.busy || demo"
-                  @click="toggleRule(index, rule.status)">{{ rule.status === 'Enabled' ? 'Disable' : 'Enable' }}</button>
+          <FadeRegion>
+            <p v-if="!state.reading && state.busy" class="muted" role="status">Reading endpoint configuration…</p>
+            <div v-else-if="readUnsupported && state.draft !== state.original" class="panel-actions configuration-actions">
+              <button type="button" :disabled="state.busy" @click="edit(state.original)">Discard draft</button>
+            </div>
+            <form v-else-if="!readUnsupported" class="panel-form" :aria-busy="state.busy" @submit.prevent="confirm = 'write'">
+              <div v-if="managed && lifecycleRules.length" class="lifecycle-quick-actions">
+                <div v-for="(rule, index) in lifecycleRules" :key="index">
+                  <span>{{ rule.name }} <small class="muted">{{ rule.status }}</small></span>
+                  <button v-if="rule.status === 'Enabled' || rule.status === 'Disabled'" type="button" :disabled="state.busy || demo"
+                    @click="toggleRule(index, rule.status)">{{ rule.status === 'Enabled' ? 'Disable' : 'Enable' }}</button>
+                </div>
               </div>
-            </div>
-            <div v-if="configuration === 'notification' && notificationTopic" class="panel-actions">
-              <button type="button" :disabled="!xml || state.busy || demo || state.reading?.status === 'error'" @click="addLinkedTopic">Add selected SNS topic to draft</button>
-            </div>
-            <XmlSettingsForm v-if="schema && xml" :parent="xml.documentElement" :fields="schema.fields"
-              :revision="revision" :disabled="state.busy || demo" @change="updateXml" />
-            <PolicySettingsForm v-else-if="policy" :value="policy" scope="policy" :disabled="state.busy || demo" @change="updatePolicy" />
-            <div class="panel-actions configuration-actions">
-              <button v-if="current.example" type="button" :disabled="state.busy || demo" @click="edit(current.example)"><Braces :size="15" /> Load example</button>
-              <button v-if="state.draft !== state.original" type="button" :disabled="state.busy" @click="edit(state.original)">Discard draft</button>
-              <button v-if="current.remove" type="button" :disabled="state.busy || demo || !state.original" @click="confirm = 'remove'">Remove setting</button>
-              <button class="primary" type="submit" :disabled="state.busy || demo || !state.draft || state.draft === state.original || state.reading?.status === 'error'">Apply settings</button>
-            </div>
-          </form>
+              <div v-if="configuration === 'notification' && notificationTopic" class="panel-actions">
+                <button type="button" :disabled="!xml || state.busy || demo || state.reading?.status === 'error'" @click="addLinkedTopic">Add selected SNS topic to draft</button>
+              </div>
+              <XmlSettingsForm v-if="schema && xml" :parent="xml.documentElement" :fields="schema.fields"
+                :revision="revision" :disabled="state.busy || demo" @change="updateXml" />
+              <PolicySettingsForm v-else-if="policy" :value="policy" scope="policy" :disabled="state.busy || demo" @change="updatePolicy" />
+              <div class="panel-actions configuration-actions">
+                <button v-if="current.example" type="button" :disabled="state.busy || demo" @click="edit(current.example)"><Braces :size="15" /> Load example</button>
+                <button v-if="state.draft !== state.original" type="button" :disabled="state.busy" @click="edit(state.original)">Discard draft</button>
+                <button v-if="current.remove" type="button" :disabled="state.busy || demo || !state.original" @click="confirm = 'remove'">Remove setting</button>
+                <button class="primary" type="submit" :disabled="state.busy || demo || !state.draft || state.draft === state.original || state.reading?.status === 'error'">Apply settings</button>
+              </div>
+            </form>
+          </FadeRegion>
         </div>
       </FadeRegion>
     </div>

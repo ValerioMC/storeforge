@@ -133,6 +133,9 @@ a { color: var(--accent-deep); text-underline-offset: .18em; }
 .browser-host { height: 100%; min-height: 0; }
 .region-fade-enter-active, .region-fade-leave-active { transition: opacity var(--motion-quick) ease; }
 .region-fade-enter-from, .region-fade-leave-to { opacity: 0; }
+.fade-stack { display: grid; min-width: 0; }
+.fade-stack > * { grid-area: 1 / 1; min-width: 0; }
+.fade-stack > .region-fade-enter-active { transition-delay: var(--motion-quick); }
 .app-bar { --app-bar-gutter: 19px; display: flex; align-items: center; gap: 12px; padding: 0 var(--app-bar-gutter); background: var(--surface); border-bottom: 1px solid var(--line); min-width: 0; }
 .app-bar[data-tauri-drag-region], .brand[data-tauri-drag-region] { user-select: none; }
 [data-window-chrome="overlay"].sidebar-collapsed .app-bar { padding-inline-start: 90px; }
@@ -456,6 +459,7 @@ fieldset p { font-size: 11.5px; margin-bottom: 6px; }
 @media (prefers-reduced-motion: reduce) {
   .region-fade-enter-active, .region-fade-leave-active { transition: none; }
   .region-fade-enter-from, .region-fade-leave-to { opacity: 1; }
+  .fade-stack > .region-fade-enter-active { transition-delay: 0s; }
   .spinning { animation: none; }
 }
 
