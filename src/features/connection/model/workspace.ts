@@ -1,14 +1,16 @@
+import { isPortalLocation, portalPages, type PortalLocation } from '../../portal/model/navigation'
 import { demoBuckets, demoPrefix } from '../../browser/model/demo'
 import { validCostMonth } from '../../monitoring/model/storage-costs'
 import { executionContext, identityAvailable, type Connection } from './connection'
 
-export type DesktopWorkspace = 'browser' | 'manager' | 'cephAdmin' | 'storageOps' | 'admin'
+export type DesktopWorkspace = 'browser' | 'manager' | 'cephAdmin' | 'storageOps' | 'admin' | 'portal'
 export type ManagerPage = 'overview' | 'buckets' | 'featureRules' | 'access' | 'tools' | 'metrics' | 'activity'
 export type CephPage = 'overview' | 'buckets' | 'resources' | 'metrics' | 'health' | 'multisite'
 export type AdminPage = 'overview' | 'connections' | 'preferences' | 'activity' | 'metrics' | 'health' | 'rgwIdentities' | 'costs' | 'governance' | 'settings'
 export type MetricPage = 'usage' | 'history' | 'traffic' | 'cost'
 export type CephGroup = 'Ceph accounts' | 'Ceph users' | 'Ceph buckets'
 export type WorkspaceDestination =
+  | ({ workspace: 'portal' } & PortalLocation)
   | { workspace: 'browser'; bucket?: string; prefix?: string }
   | { workspace: 'manager'; page: ManagerPage; bucket?: string; metric?: MetricPage; notificationTopic?: string }
   | { workspace: 'cephAdmin'; page?: CephPage; metric?: MetricPage; group?: CephGroup; bucket?: string; workbenchBucket?: string }
@@ -17,7 +19,7 @@ export type WorkspaceDestination =
 export type WorkspaceRoute = WorkspaceDestination & { connectionId: string }
 
 export const workspaceNames: Record<DesktopWorkspace, string> = {
-  browser: 'Browser', manager: 'Manager', cephAdmin: 'Ceph Admin', storageOps: 'Storage Ops', admin: 'Admin',
+  browser: 'Browser', manager: 'Manager', cephAdmin: 'Ceph Admin', storageOps: 'Storage Ops', admin: 'Admin', portal: 'Portal',
 }
 export const managerPages: Record<ManagerPage, string> = {
   overview: 'Overview', metrics: 'Usage & metrics', buckets: 'Buckets', featureRules: 'Feature rules', access: 'Access & topics', tools: 'Storage tools', activity: 'Manager activity',
@@ -31,7 +33,7 @@ export const adminPages: Record<AdminPage, string> = {
 }
 
 export function workspaceAvailable(profile: Connection | undefined, workspace: DesktopWorkspace): boolean {
-  if (workspace === 'admin' || workspace === 'storageOps') return true
+  if (workspace === 'admin' || workspace === 'storageOps' || workspace === 'portal') return true
   if (!profile) return false
   if (profile.id === 'demo') return true
   if (workspace === 'cephAdmin') {
@@ -57,6 +59,7 @@ export function defaultRoute(profile?: Connection): WorkspaceRoute {
 }
 
 export function routeTitle(route: WorkspaceRoute): string {
+  if (route.workspace === 'portal') return route.page === 'overview' ? workspaceNames.portal : portalPages[route.page]
   if (route.workspace === 'admin') return adminPages[route.page]
   if (route.workspace === 'manager') return managerPages[route.page]
   if (route.workspace === 'cephAdmin') return cephPages[route.page ?? 'overview']
@@ -69,6 +72,7 @@ export function isWorkspaceRoute(value: unknown): value is WorkspaceRoute {
     !('workspace' in value)) return false
   if ('metric' in value && value.metric !== 'usage' && value.metric !== 'history' && value.metric !== 'traffic' && value.metric !== 'cost') return false
   if ('workbenchBucket' in value && (typeof value.workbenchBucket !== 'string' || (!('page' in value) || value.page !== 'buckets'))) return false
+  if (value.workspace === 'portal') return isPortalLocation(value)
   if (value.workspace === 'storageOps') return 'page' in value && (value.page === 'overview' || value.page === 'buckets')
   if (value.workspace === 'cephAdmin') {
     return (!('page' in value) || typeof value.page === 'string' && Object.hasOwn(cephPages, value.page)) &&

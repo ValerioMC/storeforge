@@ -19,7 +19,7 @@ mime_guess = "2"
 open = "5.4"
 percent-encoding = "2"
 quick-xml = { version = "0.42", features = ["serialize"] }
-reqwest = { version = "0.12", default-features = false, features = ["rustls-tls-native-roots"] }
+reqwest = { version = "0.12", default-features = false, features = ["multipart", "rustls-tls-native-roots", "stream"] }
 rustls = { version = "0.23", default-features = false }
 rustls-pki-types = "1"
 serde = { version = "1", features = ["derive"] }

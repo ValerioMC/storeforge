@@ -7,6 +7,7 @@ mod connection;
 mod dock_icon;
 mod monitoring;
 mod object;
+mod portal;
 mod transfer;
 
 use std::sync::Arc;
@@ -82,6 +83,11 @@ pub fn run() {
             shared_service_commands::disconnect_shared_service,
             shared_service_commands::read_shared_contexts,
             shared_service_commands::open_shared_action,
+            portal::controller::read_portal,
+            portal::controller::change_portal,
+            portal::controller::portal_preview,
+            portal::controller::portal_download,
+            portal::controller::portal_upload,
             bucket_commands::list_buckets,
             bucket_commands::bucket_workbench_inventory,
             bucket_commands::bucket_workbench_configuration,

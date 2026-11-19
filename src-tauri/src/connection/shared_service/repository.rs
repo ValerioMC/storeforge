@@ -86,7 +86,7 @@ impl SharedServiceRepository {
         Self::json(request.timeout(Duration::from_secs(600))).await
     }
 
-    fn change_request<D: Serialize>(
+    pub(crate) fn change_request<D: Serialize>(
         &self,
         method: Method,
         origin: &Url,
@@ -129,7 +129,7 @@ impl SharedServiceRepository {
             .map_err(|_| AppError::Storage("Could not read the access review CSV.".into()))
     }
 
-    fn request(
+    pub(crate) fn request(
         &self,
         method: Method,
         origin: &Url,
@@ -151,7 +151,7 @@ impl SharedServiceRepository {
         })
     }
 
-    async fn send(request: RequestBuilder) -> Result<Response> {
+    pub(crate) async fn send(request: RequestBuilder) -> Result<Response> {
         let response = request
             .send()
             .await
@@ -159,7 +159,7 @@ impl SharedServiceRepository {
         check_response(response)
     }
 
-    async fn json<T: DeserializeOwned>(request: RequestBuilder) -> Result<T> {
+    pub(crate) async fn json<T: DeserializeOwned>(request: RequestBuilder) -> Result<T> {
         let body = read_body(Self::send(request).await?).await?;
         serde_json::from_slice(&body).map_err(|_| {
             AppError::Storage("The shared service returned an unexpected response.".into())
@@ -190,7 +190,7 @@ fn check_response(response: Response) -> Result<Response> {
     }
 }
 
-async fn read_body(mut response: Response) -> Result<Vec<u8>> {
+pub(crate) async fn read_body(mut response: Response) -> Result<Vec<u8>> {
     let mut body = Vec::new();
     while let Some(chunk) = response
         .chunk()

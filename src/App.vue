@@ -13,6 +13,8 @@ import AdminWorkspace from './features/administration/components/AdminWorkspace.
 import CephMultisite from './features/administration/components/CephMultisite.vue'
 import WorkspaceSettings from './features/administration/components/WorkspaceSettings.vue'
 import PlatformGovernance from './features/administration/components/PlatformGovernance.vue'
+import PortalWorkspace from './features/portal/components/PortalWorkspace.vue'
+import { readPortalLocation, writePortalLocation } from './features/portal/model/navigation'
 import BrowserWorkspace from './features/browser/components/BrowserWorkspace.vue'
 import type { Location } from './features/browser/model/objects'
 import { demoConnection } from './features/browser/model/demo'
@@ -198,6 +200,12 @@ async function initialize(): Promise<void> {
   const preferred = findProfile(startup.value)
   const fallback = defaultRoute(preferred ?? connections.active)
   navigation.initialize(fallback, routeAllowed)
+  const portalLocation = readPortalLocation(window.location.search)
+  if (portalLocation) {
+    openRoute({ ...portalLocation, workspace: 'portal', connectionId: '' })
+    await jobs.load()
+    return
+  }
   if (followWorkbenchLink()) {
     await jobs.load()
     return
@@ -235,6 +243,8 @@ function synchronize(destination: WorkspaceRoute): void {
     navigation.replace(defaultRoute(selected ?? connections.active))
     return
   }
+  synchronizePortalQuery(destination)
+  if (destination.workspace === 'portal') return
   if (destination.connectionId !== connections.activeId) connections.select(destination.connectionId)
   const allowed = workspaceAvailable(selected, 'browser') || workspaceAvailable(selected, 'manager')
   const key = allowed ? connections.contextKey : ''
@@ -244,6 +254,13 @@ function synchronize(destination: WorkspaceRoute): void {
     void browser.changeConnection(allowed ? destination.connectionId : '', selected?.revision ?? '')
   }
   if (destination.workspace === 'browser') void browser.navigate(destination.bucket ?? '', destination.prefix ?? '')
+}
+
+function synchronizePortalQuery(destination: WorkspaceRoute): void {
+  if (destination.workspace !== 'portal' && !new URLSearchParams(window.location.search).has('portal')) return
+  const url = new URL(window.location.href)
+  writePortalLocation(url, destination.workspace === 'portal' ? destination : undefined)
+  if (url.href !== window.location.href) window.history.replaceState(window.history.state, '', url)
 }
 
 function leavingBucket(action: () => void): void {
@@ -323,6 +340,14 @@ function keydown(event: KeyboardEvent): void {
 
 function go(destination: WorkspaceDestination): void {
   if (!workspaceAvailable(connections.active, destination.workspace)) return
+  if (destination.workspace === 'portal') {
+    const current = route.value
+    const target = current.workspace === 'portal' && !destination.serviceId
+      ? { serviceId: current.serviceId, projectId: current.projectId, ...destination }
+      : destination
+    openRoute({ ...target, connectionId: '' })
+    return
+  }
   if (destination.workspace === 'browser' && !destination.bucket && browser.bucket) {
     destination = { workspace: 'browser', bucket: browser.bucket, prefix: browser.prefix }
   }
@@ -344,7 +369,8 @@ function openMonitoringDestination(destination: WorkspaceDestination, connection
 }
 
 function openWorkspaceRoot(): void {
-  if (route.value.workspace === 'browser') openBucket('')
+  if (route.value.workspace === 'portal') go({ workspace: 'portal', page: 'overview' })
+  else if (route.value.workspace === 'browser') openBucket('')
   else if (route.value.workspace === 'manager') go({ workspace: 'manager', page: 'overview' })
   else if (route.value.workspace === 'storageOps') go({ workspace: 'storageOps', page: 'overview' })
   else if (route.value.workspace === 'cephAdmin') go({ workspace: 'cephAdmin', page: 'overview' })
@@ -422,7 +448,7 @@ function showJob(id: string): void {
               <button class="icon-button subtle" aria-label="Go forward" title="Go forward (Alt + Right)" :disabled="!navigation.canForward" @click="history('forward')"><ArrowRight :size="17" /></button>
             </div>
           </div>
-          <div class="shell-context">
+          <div class="shell-context" v-if="route.workspace !== 'portal'">
             <AppSelect id="active-connection" :model-value="connections.activeId" :options="contextOptions"
               aria-label="Connection context" placeholder="Select a connection" @update:model-value="selectContext">
               <template #leading><Server :size="16" /></template>
@@ -430,14 +456,14 @@ function showJob(id: string): void {
             <AppSelect v-if="realmOptions.length > 1" :model-value="connections.activeId" :options="realmOptions" aria-label="Same-realm profile" @update:model-value="selectContext" />
           </div>
           <div class="top-controls">
-            <span v-if="demo" class="demo-label"><span class="status-dot online" /> Read-only demo</span>
-            <span v-else-if="connections.active" class="connection-status">{{ connections.active.settings?.openstack ? 'OpenStack' : providerNames[connections.active.provider] }}</span>
+            <span v-if="demo && route.workspace !== 'portal'" class="demo-label"><span class="status-dot online" /> Read-only demo</span>
+            <span v-else-if="connections.active && route.workspace !== 'portal'" class="connection-status">{{ connections.active.settings?.openstack ? 'OpenStack' : providerNames[connections.active.provider] }}</span>
             <button class="icon-button subtle" type="button" :aria-label="`${workspaceNames[route.workspace]} help`" @click="help = true"><CircleHelp :size="18" /></button>
           </div>
           <WindowControls v-if="windowChrome === 'custom'" @error="startError = $event" />
         </header>
         <nav class="shell-breadcrumbs" aria-label="Workspace breadcrumb">
-          <button v-if="resource || route.workspace === 'manager' || route.workspace === 'admin' || route.workspace === 'cephAdmin' || route.workspace === 'storageOps'"
+          <button v-if="resource || route.workspace === 'manager' || route.workspace === 'admin' || route.workspace === 'cephAdmin' || route.workspace === 'storageOps' || route.workspace === 'portal'"
             type="button" class="subtle" @click="openWorkspaceRoot">{{ workspaceNames[route.workspace] }}</button>
           <span v-else :aria-current="routeTitle(route) === workspaceNames[route.workspace] ? 'page' : undefined">{{ workspaceNames[route.workspace] }}</span>
           <template v-if="routeTitle(route) !== workspaceNames[route.workspace]">
@@ -453,7 +479,9 @@ function showJob(id: string): void {
       <div class="work-area">
         <FadeRegion>
           <KeepAlive include="BrowserWorkspace,ManagerWorkspace,MonitoringWorkspace,ActivityWorkspace,ToolsWorkspace,BucketWorkbench,StorageCostsWorkspace" :max="12">
-            <BrowserWorkspace v-if="route.workspace === 'browser'" key="browser" ref="browserView" :demo="demo" :compact="compact" @add="openEditor()"
+            <PortalWorkspace v-if="route.workspace === 'portal'" :location="route"
+              @navigate="location => go({ ...location, workspace: 'portal' })" @connections="go({ workspace: 'admin', page: 'connections' })" />
+            <BrowserWorkspace v-else-if="route.workspace === 'browser'" key="browser" ref="browserView" :demo="demo" :compact="compact" @add="openEditor()"
               @demo="openDemo" @create-bucket="creatingBucket = true" @tools="go({ workspace: 'manager', page: 'tools' })" @job="jobStarted" @navigate="openBucket" @favorite="openFavorite" />
             <StorageCostsWorkspace v-else-if="route.workspace === 'admin' && route.page === 'costs'" key="storage-costs"
               :subject="route.costSubject" :subject-month="route.costMonth" :compact="compact" :scope-key="costScopeKey"
