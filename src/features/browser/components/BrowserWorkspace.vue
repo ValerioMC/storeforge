@@ -476,7 +476,9 @@ async function rename(): Promise<void> {
 }
 
 async function removeBucket(): Promise<void> {
+  const removed = browser.bucket
   navigate('')
+  browser.forgetBucket(removed)
   await browser.loadBuckets()
 }
 

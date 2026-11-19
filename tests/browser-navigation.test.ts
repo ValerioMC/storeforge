@@ -129,3 +129,28 @@ it('persists listing preferences for the exact connection revision and path', as
   expect(reopened.recursive).toBe(false)
   expect(reopened.columnWidths.modified).toBeUndefined()
 })
+
+it('leaves a deleted bucket and its path out of the current location and recent places', async () => {
+  const browser = useBrowser()
+  vi.mocked(objectsApi.list).mockResolvedValue({ rows: [], cursor: null })
+  await browser.changeConnection('demo')
+  await browser.navigate('archive', 'logs/')
+  await browser.navigate('reports')
+  await browser.navigate('archive', 'logs/')
+
+  browser.forgetBucket('archive')
+
+  expect(browser.location).toEqual({ connection: 'demo', bucket: '', prefix: '' })
+  expect(browser.recent.map(entry => entry.bucket)).toEqual(['reports'])
+})
+
+it('keeps the current location when another bucket is deleted', async () => {
+  const browser = useBrowser()
+  vi.mocked(objectsApi.list).mockResolvedValue({ rows: [], cursor: null })
+  await browser.changeConnection('demo')
+  await browser.navigate('reports', 'q1/')
+
+  browser.forgetBucket('archive')
+
+  expect(browser.location).toEqual({ connection: 'demo', bucket: 'reports', prefix: 'q1/' })
+})

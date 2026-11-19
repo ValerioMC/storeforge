@@ -68,6 +68,7 @@ function changed(): void {
 async function bucketRemoved(): Promise<void> {
   discard()
   changed()
+  browser.forgetBucket(props.bucket ?? '')
   emit('inventory')
   await browser.loadBuckets()
 }

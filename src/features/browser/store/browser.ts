@@ -130,6 +130,13 @@ function browserStore(profile: BrowserProfile) {
     await loadRows()
   }
 
+  function forgetBucket(name: string): void {
+    recent.value = recent.value.filter(entry => entry.bucket !== name)
+    if (bucket.value !== name) return
+    rows.value = []
+    restoreView('', '')
+  }
+
   function viewKey(name = bucket.value, path = prefix.value): string {
     return JSON.stringify([connection.value, revision.value, name, path])
   }
@@ -257,7 +264,7 @@ function browserStore(profile: BrowserProfile) {
     buckets, bucket, prefix, rows, selected, selectedObjects, focus, focusedRow, cursor, loading, bucketLoading, error, bucketError,
     location, recursive, filter, technical, tab, advanced, options, sort, detailColumns, columnWidths,
     rowDetails, prefixCount, deletedError, limitReached, recent, favorites, isFavorite, revision, metadataDrafts, tagDrafts,
-    loadBuckets, changeConnection, navigate, loadRows, toggleSelection,
+    loadBuckets, changeConnection, navigate, forgetBucket, loadRows, toggleSelection,
     invalidateRowDetails, loadRowDetails, loadPrefixCount, toggleFavorite,
   }
 }
