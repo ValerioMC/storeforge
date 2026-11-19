@@ -9,7 +9,7 @@ export type MetricPage = 'usage' | 'history' | 'traffic' | 'cost'
 export type CephGroup = 'Ceph accounts' | 'Ceph users' | 'Ceph buckets'
 export type WorkspaceDestination =
   | { workspace: 'browser'; bucket?: string; prefix?: string }
-  | { workspace: 'manager'; page: ManagerPage; bucket?: string; metric?: MetricPage }
+  | { workspace: 'manager'; page: ManagerPage; bucket?: string; metric?: MetricPage; notificationTopic?: string }
   | { workspace: 'cephAdmin'; page?: CephPage; metric?: MetricPage; group?: CephGroup; bucket?: string }
   | { workspace: 'admin'; page: AdminPage; jobId?: string; audit?: boolean; metric?: MetricPage }
 export type WorkspaceRoute = WorkspaceDestination & { connectionId: string }
@@ -71,7 +71,8 @@ export function isWorkspaceRoute(value: unknown): value is WorkspaceRoute {
   if (!('page' in value) || typeof value.page !== 'string') return false
   if (value.workspace === 'admin') return Object.hasOwn(adminPages, value.page) && hasOptionalString(value, 'jobId') && (!('audit' in value) || typeof value.audit === 'boolean')
   return value.workspace === 'manager' && Object.hasOwn(managerPages, value.page) &&
-    hasOptionalString(value, 'bucket')
+    hasOptionalString(value, 'bucket') && (!('notificationTopic' in value) ||
+      value.page === 'buckets' && 'bucket' in value && typeof value.notificationTopic === 'string')
 }
 
 function hasOptionalString(value: object, key: 'bucket' | 'prefix' | 'jobId'): boolean {

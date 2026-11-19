@@ -10,6 +10,7 @@ use crate::{
 };
 
 use super::{
+    iam_roles::{role_tag_batches, validate_iam_resource_write},
     model::{AdminRequest, Operation, Protocol},
     private_access::ensure_generic_iam_write,
     repository,
@@ -83,11 +84,28 @@ impl AdministrationService {
         )?;
         if operation.protocol == Protocol::Iam && operation.write {
             ensure_generic_iam_write(self, session, &operation.action, &values).await?;
+            validate_iam_resource_write(&operation.action, &values, session.profile.provider)?;
         }
-        let result = repository::execute(session, operation, &values).await;
+        let result = if operation.action == "TagRole" {
+            write_role_tags(session, operation, values).await
+        } else {
+            repository::execute(session, operation, &values).await
+        };
         tracing::info!(operation = %operation.label, connection = %session.context.connection_id, principal = %session.context.principal_id, success = result.is_ok(), "Administration request completed");
         audit.record(session.profile.id, &operation.label, None, result)
     }
+}
+
+async fn write_role_tags(
+    session: &Session,
+    operation: &Operation,
+    values: BTreeMap<String, String>,
+) -> Result<String> {
+    let mut response = String::new();
+    for batch in role_tag_batches(values, session.profile.provider)? {
+        response = repository::execute(session, operation, &batch).await?;
+    }
+    Ok(response)
 }
 
 fn validate_request(
@@ -108,6 +126,9 @@ fn validate_request(
     }
     if let Some(label) = operation.fields.iter().find(|field| {
         field.required
+            && !(operation.action == "SetTopicAttributes"
+                && field.key == "AttributeValue"
+                && values.contains_key(&field.key))
             && values
                 .get(&field.key)
                 .is_none_or(|value| value.trim().is_empty())
@@ -124,7 +145,10 @@ fn validate_request(
     }
     Ok(values
         .into_iter()
-        .filter(|(_, value)| !value.is_empty())
+        .filter(|(key, value)| {
+            !value.is_empty()
+                || (operation.action == "SetTopicAttributes" && key == "AttributeValue")
+        })
         .collect())
 }
 

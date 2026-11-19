@@ -11,15 +11,15 @@ import type { Configuration } from '../model/bucket'
 import { configurations } from '../model/configuration'
 import type { JsonValue } from '../model/policy-document'
 import { configurationGroups, configurationLabel, extractRules, parseConfiguration, setLifecycleRuleStatus } from '../model/workspace'
-import { writeXml } from '../model/xml-document'
+import { addXmlField, setXmlValue, writeXml, xmlChildren } from '../model/xml-document'
 import { xmlSettings } from '../model/xml-settings'
 import BucketBackupDialog from './BucketBackupDialog.vue'
 import PolicySettingsForm from './PolicySettingsForm.vue'
 import XmlSettingsForm from './XmlSettingsForm.vue'
 
-const props = defineProps<{ connection: string; bucket: string; demo: boolean; managed?: boolean }>()
+const props = defineProps<{ connection: string; bucket: string; demo: boolean; managed?: boolean; notificationTopic?: string }>()
 const emit = defineEmits<{ removed: []; changed: [] }>()
-const configuration = ref<Configuration>('versioning')
+const configuration = ref<Configuration>(props.notificationTopic ? 'notification' : 'versioning')
 const current = computed(() => configurations.find(item => item.id === configuration.value)!)
 const schema = computed(() => configuration.value === 'policy' ? undefined : xmlSettings[configuration.value])
 const editors = shallowRef(newEditors())
@@ -42,12 +42,16 @@ let scope = 0
 watch(() => [props.connection, props.bucket, props.demo], () => {
   scope++
   editors.value = newEditors()
-  configuration.value = 'versioning'
+  configuration.value = props.notificationTopic ? 'notification' : 'versioning'
   confirm.value = undefined
   backup.value = undefined
   importing.value = false
   exporting.value = false
 }, { flush: 'sync' })
+
+watch(() => props.notificationTopic, topic => {
+  if (topic) configuration.value = 'notification'
+})
 
 watch([editors, configuration], ([editor, section]) => {
   operationError.value = ''
@@ -91,6 +95,20 @@ function updateXml(): void {
 
 function updatePolicy(value: JsonValue): void {
   if (value !== null && typeof value === 'object' && !Array.isArray(value)) edit(JSON.stringify(value, null, 2))
+}
+
+function addLinkedTopic(): void {
+  const root = xml.value?.documentElement
+  const arn = props.notificationTopic
+  const group = xmlSettings.notification.fields.find(field => field.name === 'TopicConfiguration')
+  if (!root || !arn || group?.kind !== 'group') return
+  const topic = group.fields.find(field => field.name === 'Topic')
+  if (!topic || topic.kind === 'group') return
+  addXmlField(root, group)
+  const rule = xmlChildren(root, group.name).at(-1)
+  if (!rule) return
+  setXmlValue(rule, topic, arn)
+  updateXml()
 }
 
 async function importFile(event: Event): Promise<void> {
@@ -207,6 +225,9 @@ defineExpose({
                 <button v-if="rule.status === 'Enabled' || rule.status === 'Disabled'" type="button" :disabled="state.busy || demo"
                   @click="toggleRule(index, rule.status)">{{ rule.status === 'Enabled' ? 'Disable' : 'Enable' }}</button>
               </div>
+            </div>
+            <div v-if="configuration === 'notification' && notificationTopic" class="panel-actions">
+              <button type="button" :disabled="!xml || state.busy || demo || state.reading?.status === 'error'" @click="addLinkedTopic">Add selected SNS topic to draft</button>
             </div>
             <XmlSettingsForm v-if="schema && xml" :parent="xml.documentElement" :fields="schema.fields"
               :revision="revision" :disabled="state.busy || demo" @change="updateXml" />

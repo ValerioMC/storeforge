@@ -20,14 +20,14 @@ import BucketUsage from './BucketUsage.vue'
 
 type BucketTab = 'overview' | 'configuration' | 'objects' | 'usage' | 'quota'
 
-const props = defineProps<{ profile: Connection; bucket?: string; browseAvailable: boolean; demo: boolean; compact: boolean }>()
+const props = defineProps<{ profile: Connection; bucket?: string; notificationTopic?: string; browseAvailable: boolean; demo: boolean; compact: boolean }>()
 const emit = defineEmits<{ inventory: []; inspect: [bucket: string]; browse: [bucket: string]; create: []; connections: []; tools: [bucket: string]; job: [id: string] }>()
 const browser = useBrowser()
 const inventory = ref<InstanceType<typeof BucketInventory>>()
 const settings = ref<InstanceType<typeof BucketSettings>>()
 const quota = ref<InstanceType<typeof BucketQuota>>()
-const bucketTab = ref<BucketTab>('overview')
-const settingsVisited = ref(false)
+const bucketTab = ref<BucketTab>(props.notificationTopic ? 'configuration' : 'overview')
+const settingsVisited = ref(!!props.notificationTopic)
 const quotaAvailable = computed(() => props.profile.provider === 'ceph' && identityAvailable(props.profile, 'cephAdmin'))
 const bucketTabs = computed(() => [
   { value: 'overview', label: 'Overview' },
@@ -45,9 +45,11 @@ const sample = computed(() => samples.value.find(item => item.bucket === props.b
 const dirty = computed(() => !!(settings.value?.dirty || quota.value?.dirty))
 const busy = computed(() => !!(settings.value?.busy || quota.value?.saving))
 
-watch(() => props.bucket, () => {
-  bucketTab.value = 'overview'
-  settingsVisited.value = false
+watch(() => [props.bucket, props.notificationTopic], ([bucket, topic], [previous]) => {
+  if (topic || bucket !== previous) {
+    bucketTab.value = topic ? 'configuration' : 'overview'
+    settingsVisited.value = !!topic
+  }
 })
 
 watch(bucketTab, tab => {
@@ -120,7 +122,7 @@ defineExpose({ dirty, busy, discard })
         </FadeRegion>
         <FadeRegion>
           <BucketSettings v-if="settingsVisited" v-show="bucketTab === 'configuration'" ref="settings" :connection="profile.id"
-            :bucket="bucket" :demo="demo" managed @removed="bucketRemoved" @changed="changed" />
+            :bucket="bucket" :demo="demo" :notification-topic="notificationTopic" managed @removed="bucketRemoved" @changed="changed" />
         </FadeRegion>
         <FadeRegion>
           <BucketQuota v-if="quotaAvailable" v-show="bucketTab === 'quota'" ref="quota" :profile="profile"

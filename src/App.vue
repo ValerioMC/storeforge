@@ -371,7 +371,7 @@ function showJob(id: string): void {
               :profile="connections.active" :profiles="connections.profiles" :compact="compact"
               @open="openMonitoringDestination" @create="creatingBucket = true" />
             <ManagerWorkspace v-else-if="managerRoute?.page === 'buckets' && connections.active" ref="managerView"
-              :key="`manager:${connections.contextKey}`" :profile="connections.active" :bucket="managerRoute.bucket"
+              :key="`manager:${connections.contextKey}`" :profile="connections.active" :bucket="managerRoute.bucket" :notification-topic="managerRoute.notificationTopic"
               :demo="demo" :browse-available="canBrowse" :compact="compact" @inventory="go({ workspace: 'manager', page: 'buckets' })"
               @inspect="go({ workspace: 'manager', page: 'buckets', bucket: $event })" @browse="openBucket" @job="jobStarted"
               @tools="go({ workspace: 'manager', page: 'tools', bucket: $event })" @create="creatingBucket = true" @connections="go({ workspace: 'admin', page: 'connections' })" />
@@ -381,7 +381,8 @@ function showJob(id: string): void {
             <AdminWorkspace v-else-if="route.workspace === 'cephAdmin' || managerRoute?.page === 'access'"
               :key="`access:${route.workspace}:${connections.contextKey}:${route.workspace === 'cephAdmin' ? route.group ?? '' : ''}:${route.workspace === 'cephAdmin' ? route.bucket ?? '' : ''}`" :scope="route.workspace === 'cephAdmin' ? 'ceph' : 's3'"
               :connection="connections.active" :bucket="route.workspace === 'cephAdmin' ? route.bucket ?? browser.bucket : browser.bucket"
-              :initial-group="route.workspace === 'cephAdmin' ? route.group : undefined" :demo="demo" @open="openProfile" />
+              :initial-group="route.workspace === 'cephAdmin' ? route.group : undefined" :demo="demo" @open="openProfile"
+              @notifications="(bucket, arn) => go({ workspace: 'manager', page: 'buckets', bucket, notificationTopic: arn })" />
             <ToolsWorkspace v-else-if="managerRoute?.page === 'tools'" :key="`tools:${connections.contextKey}`" :location="toolsLocation"
               :profiles="managerProfiles" :source-buckets="browser.buckets" :demo="demo" @job="showJob" @source="go({ workspace: 'manager', page: 'tools', bucket: $event })" />
             <ActivityWorkspace v-else-if="route.workspace === 'admin' && route.page === 'activity'" key="activity" :demo="demo" :preselected="route.jobId ?? null" :audit="route.audit"

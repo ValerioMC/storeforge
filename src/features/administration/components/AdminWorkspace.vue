@@ -14,9 +14,12 @@ import { operations, type Operation } from '../model/operations'
 import AdminResponse from './AdminResponse.vue'
 import IamIdentities from './IamIdentities.vue'
 import IamPrivateAccess from './IamPrivateAccess.vue'
+import IamRoles from './IamRoles.vue'
+import IamManagedPolicies from './IamManagedPolicies.vue'
+import SnsTopics from './SnsTopics.vue'
 
 const props = defineProps<{ connection?: Connection; bucket?: string; initialGroup?: CephGroup; demo: boolean; scope: 's3' | 'ceph' }>()
-const emit = defineEmits<{ open: [profile: Connection] }>()
+const emit = defineEmits<{ open: [profile: Connection]; notifications: [bucket: string, arn: string] }>()
 const group = ref<string>(props.initialGroup ?? 'IAM users')
 const selected = ref('')
 const values = ref<Record<string, string>>({})
@@ -123,6 +126,9 @@ async function execute(confirmed: boolean): Promise<void> {
               <IamIdentities v-if="!demo && connection && (group === 'IAM users' || group === 'IAM groups')"
                 :connection="connection.id" :kind="group === 'IAM users' ? 'User' : 'Group'" @personal-access="group = 'Personal access'" />
               <IamPrivateAccess v-else-if="!demo && connection && group === 'Personal access'" :profile="connection" @open="emit('open', $event)" />
+              <IamRoles v-else-if="!demo && connection && group === 'IAM roles'" :connection="connection.id" :provider="connection.provider" />
+              <IamManagedPolicies v-else-if="!demo && connection && group === 'IAM policies'" :connection="connection.id" :provider="connection.provider" />
+              <SnsTopics v-else-if="!demo && connection && group === 'Notifications'" :profile="connection" @notifications="(bucket, arn) => emit('notifications', bucket, arn)" />
               <form v-else class="panel-form" @submit.prevent="review">
                 <div class="stage-heading">
                   <div><h2>{{ group }}</h2><p>{{ operation?.protocol === 'rgw' ? 'Manage the selected gateway using its RGW Admin Ops API.' : 'Manage resources within the selected account.' }}</p></div>

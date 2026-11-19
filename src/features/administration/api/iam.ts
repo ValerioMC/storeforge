@@ -2,7 +2,7 @@ import { desktop, errorMessage } from '../../../common/tauri'
 import { administer } from './administration'
 import { operations } from '../model/operations'
 import {
-  fields, iamIdentity, iamKey, iamPolicy, members, policyDocument, queryPage, queryResult, requiredField,
+  field, fields, iamIdentity, iamKey, iamPolicy, members, policyDocument, queryPage, queryResult, requiredField,
   type IamIdentity, type IamKey, type IamPolicy, type IdentityKind, type IssuedIamKey, type PrivateAccess,
   type PrivateAccessChange, type QueryPage,
 } from '../model/iam'
@@ -63,7 +63,7 @@ export async function listInline(connection: string, kind: IdentityKind | 'Role'
 
 export async function readInline(connection: string, kind: IdentityKind | 'Role', name: string, policy: string): Promise<string> {
   const result = await readQuery(connection, `Get${kind}Policy`, { [`${kind}Name`]: name, PolicyName: policy })
-  return policyDocument(requiredField(result, 'PolicyDocument'))
+  return policyDocument(field(result, 'PolicyDocument') || requiredField(result, 'Permission_policy'))
 }
 
 export async function listKeys(connection: string, user: string, marker?: string): Promise<QueryPage<IamKey>> {
