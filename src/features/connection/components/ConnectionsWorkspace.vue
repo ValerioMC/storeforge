@@ -9,6 +9,7 @@ import { errorMessage } from '../../../common/tauri'
 import { capabilityNames, identityCapability, providerNames, type Connection } from '../model/connection'
 import { useConnections } from '../store/connections'
 import OpenStackConnections from './OpenStackConnections.vue'
+import SharedServiceConnections from './SharedServiceConnections.vue'
 
 defineProps<{ hasDraft: boolean }>()
 const emit = defineEmits<{ add: []; edit: [profile: Connection]; browse: [profile: Connection]; demo: [] }>()
@@ -68,6 +69,7 @@ async function removeProfile(): Promise<void> {
       <button @click="emit('demo')">Explore the demo</button>
     </EmptyState>
     <OpenStackConnections @browse="useProfile" />
+    <SharedServiceConnections />
     <ConfirmDialog v-if="removing" title="Remove connection?" :description="`${removing.name} and its credentials will be removed from this device.`"
       action="Remove connection" danger @close="removing = undefined" @confirm="removeProfile" />
   </section>

@@ -3,3 +3,4 @@ pub mod model;
 pub mod openstack;
 pub mod repository;
 pub mod service;
+pub mod shared_service;

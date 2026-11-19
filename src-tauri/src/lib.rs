@@ -22,6 +22,7 @@ use bucket::controller as bucket_commands;
 use connection::{
     controller as connection_commands, repository::ConnectionRepository, service::ConnectionService,
 };
+use connection::shared_service::{controller as shared_service_commands, service::SharedService};
 use monitoring::{
     controller as monitoring_commands,
     service::MonitoringService,
@@ -45,6 +46,7 @@ pub fn run() {
                 JobRepository::open(directory.clone())?,
                 Arc::clone(&connections),
             );
+            app.manage(SharedService::open(directory.clone())?);
             app.manage(connections);
             app.manage(transfers);
             app.manage(transfer::migration::service::MigrationService::open(
@@ -73,6 +75,12 @@ pub fn run() {
             connection_commands::save_connection,
             connection_commands::remove_connection,
             connection_commands::test_connection,
+            shared_service_commands::list_shared_services,
+            shared_service_commands::save_shared_service,
+            shared_service_commands::connect_shared_service,
+            shared_service_commands::disconnect_shared_service,
+            shared_service_commands::read_shared_contexts,
+            shared_service_commands::open_shared_action,
             bucket_commands::list_buckets,
             bucket_commands::bucket_workbench_inventory,
             bucket_commands::bucket_workbench_configuration,

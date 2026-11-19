@@ -16,6 +16,7 @@ chrono = { version = "0.4", features = ["serde"] }
 http = "1"
 md-5 = "0.10"
 mime_guess = "2"
+open = "5.4"
 percent-encoding = "2"
 quick-xml = { version = "0.42", features = ["serialize"] }
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls-native-roots"] }
