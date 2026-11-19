@@ -1,0 +1,6 @@
+* text=auto
+Cargo.toml text eol=lf
+Cargo.lock text eol=lf
+*.rs text eol=lf
+*.mjs text eol=lf
+*.json text eol=lf

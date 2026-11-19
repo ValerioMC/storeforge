@@ -19,8 +19,8 @@ function setVersion(version) {
   updateJson('package.json', value => { value.version = version })
   updateJson('package-lock.json', value => { value.version = version; value.packages[''].version = version })
   updateJson('src-tauri/tauri.conf.json', value => { value.version = version })
-  replaceVersion('src-tauri/Cargo.toml', /(^\[package\]\nname = "storeforge"\nversion = ")[^"]+(")/m, version)
-  replaceVersion('src-tauri/Cargo.lock', /(\[\[package\]\]\nname = "storeforge"\nversion = ")[^"]+(")/, version)
+  replaceVersion('src-tauri/Cargo.toml', /(^\[package\]\r?\nname = "storeforge"\r?\nversion\s*=\s*")[^"]+(")/m, version)
+  replaceVersion('src-tauri/Cargo.lock', /(\[\[package\]\]\r?\nname = "storeforge"\r?\nversion = ")[^"]+(")/, version)
 }
 
 setVersion(process.argv[2])
