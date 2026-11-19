@@ -34,11 +34,16 @@ export const useConnections = defineStore('connections', () => {
     return profile
   }
 
+  async function refreshProfile(id: string): Promise<Connection | undefined> {
+    profiles.value = await connectionsApi.list()
+    return profiles.value.find(profile => profile.id === id)
+  }
+
   async function remove(id: string): Promise<void> {
     await connectionsApi.remove(id)
     profiles.value = await connectionsApi.list()
     if (activeId.value === id) select(defaultProfileId())
   }
 
-  return { profiles, activeId, active, contextKey, realmEndpoints, load, select, save, remove }
+  return { profiles, activeId, active, contextKey, realmEndpoints, load, select, save, refreshProfile, remove }
 })

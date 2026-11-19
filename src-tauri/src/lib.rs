@@ -41,7 +41,10 @@ pub fn run() {
             app.manage(connections);
             app.manage(transfers);
             app.manage(MonitoringService::open(directory.clone())?);
-            app.manage(AuditService::open(directory)?);
+            app.manage(AuditService::open(directory.clone())?);
+            app.manage(administration::private_access::PrivateAccessService::new(
+                directory,
+            ));
             app.manage(AdministrationService::new()?);
             create_main_window(app)?;
             Ok(())
@@ -81,6 +84,8 @@ pub fn run() {
             transfer_commands::location_usage,
             transfer_commands::check_integrity,
             administration_commands::administer,
+            administration_commands::list_private_iam,
+            administration_commands::change_private_iam,
             audit_commands::list_audit,
             monitoring_commands::monitoring_cached,
             monitoring_commands::monitoring_collect,

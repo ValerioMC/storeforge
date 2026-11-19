@@ -78,6 +78,7 @@ pub struct EndpointSettings {
     pub manager_enabled: bool,
     pub default_workspace: Option<Workspace>,
     pub coordinates: Option<EndpointCoordinates>,
+    pub managed_iam: Option<ManagedIamOwner>,
 }
 
 impl Default for EndpointSettings {
@@ -94,8 +95,19 @@ impl Default for EndpointSettings {
             manager_enabled: true,
             default_workspace: None,
             coordinates: None,
+            managed_iam: None,
         }
     }
+}
+
+#[derive(Clone, Deserialize, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ManagedIamOwner {
+    pub provisioning_id: Uuid,
+    pub administrator: Uuid,
+    pub user_id: String,
+    pub user_name: String,
+    pub access_key_id: String,
 }
 
 #[derive(Clone, Deserialize, Serialize)]

@@ -54,8 +54,9 @@ async function removeProfile(): Promise<void> {
         </div>
         <span v-if="profile.id === connections.activeId" class="chip chip-active">Active</span>
         <button :title="capabilityNames[identityCapability(profile, 's3')]" @click="useProfile(profile)">Open workspace</button>
-        <button class="icon-button subtle" :aria-label="`Edit ${profile.name}`" @click="emit('edit', profile)"><Pencil :size="16" /></button>
-        <button class="icon-button subtle" :aria-label="`Remove ${profile.name}`" @click="removing = profile"><Trash2 :size="16" /></button>
+        <span v-if="profile.settings?.managedIam" class="chip" :title="profile.settings.managedIam.userName">Managed IAM</span>
+        <button v-if="!profile.settings?.managedIam" class="icon-button subtle" :aria-label="`Edit ${profile.name}`" @click="emit('edit', profile)"><Pencil :size="16" /></button>
+        <button v-if="!profile.settings?.managedIam" class="icon-button subtle" :aria-label="`Remove ${profile.name}`" @click="removing = profile"><Trash2 :size="16" /></button>
       </div>
     </div>
     <EmptyState v-else :icon="Cable" title="No saved connections" description="Add an Amazon S3, Ceph RGW or other S3-compatible endpoint.">

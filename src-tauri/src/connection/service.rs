@@ -20,7 +20,8 @@ use crate::common::error::{AppError, Result};
 use super::{
     model::{
         CapabilityState, Connection, ConnectionCheck, ConnectionDraft, ExecutionContext,
-        IdentityKind, Provider, Secret, ServiceDraft, ServiceIdentity, StoredConnection, Workspace,
+        IdentityKind, ManagedIamOwner, Provider, Secret, ServiceDraft, ServiceIdentity,
+        StoredConnection, Workspace,
     },
     repository::{ConnectionRepository, CredentialRepository, KeyringRepository},
 };
@@ -106,11 +107,67 @@ impl ConnectionService {
                 .iter()
                 .position(|entry| entry.profile.id == id)
                 .ok_or_else(missing_profile)?;
+            ensure_unmanaged(&entries[position].profile)?;
             Ok(entries.remove(position))
         })?;
         self.remove_secrets(
             std::iter::once(removed.secret_id).chain(removed.service_secret_ids.into_values()),
         );
+        Ok(())
+    }
+
+    pub(crate) fn save_managed_iam(
+        &self,
+        parent: &Connection,
+        name: String,
+        owner: ManagedIamOwner,
+        workspaces: (bool, bool),
+        secret: Secret,
+    ) -> Result<Connection> {
+        validate_secret(&secret)?;
+        let id = owner.provisioning_id;
+        let mut profile = parent.clone();
+        profile.id = id;
+        profile.endpoint_id = Some(parent.endpoint_id());
+        profile.revision = Some(Uuid::new_v4());
+        profile.name = name;
+        profile.s3_capability = CapabilityState::Unknown;
+        profile.known_buckets.clear();
+        profile.services.clear();
+        profile.settings.default_endpoint = false;
+        (
+            profile.settings.browser_enabled,
+            profile.settings.manager_enabled,
+        ) = workspaces;
+        profile.settings.default_workspace = None;
+        profile.settings.managed_iam = Some(owner);
+        self.credentials.write(id, &secret)?;
+        match self.repository.update(|entries| {
+            entries.push(StoredConnection {
+                profile: profile.clone(),
+                secret_id: id,
+                service_secret_ids: BTreeMap::new(),
+            });
+            Ok(profile)
+        }) {
+            Ok(profile) => Ok(profile),
+            Err(error) => {
+                self.credentials.remove(id);
+                Err(error)
+            }
+        }
+    }
+
+    pub(crate) fn remove_managed_iam(&self, id: Uuid) -> Result<()> {
+        self.repository.update(|entries| {
+            if let Some(position) = entries.iter().position(|entry| {
+                entry.profile.id == id && entry.profile.settings.managed_iam.is_some()
+            }) {
+                entries.remove(position);
+            }
+            Ok(())
+        })?;
+        self.credentials.remove(id);
         Ok(())
     }
 
@@ -140,6 +197,9 @@ impl ConnectionService {
     fn prepare(&self, draft: &ConnectionDraft) -> Result<PreparedConnection> {
         self.repository.read(|entries| {
             let existing = draft.id.map(|id| profile_by_id(entries, id)).transpose()?;
+            if let Some(entry) = existing {
+                ensure_unmanaged(&entry.profile)?;
+            }
             let profile = validate_profile(draft, existing.map(|entry| &entry.profile), entries)?;
             let mut stored = existing.cloned().unwrap_or_else(|| StoredConnection {
                 profile: profile.clone(),
@@ -285,6 +345,15 @@ impl ConnectionService {
     }
 }
 
+fn ensure_unmanaged(profile: &Connection) -> Result<()> {
+    if profile.settings.managed_iam.is_some() {
+        return Err(AppError::Invalid(
+            "Manage this connection through IAM personal access.".into(),
+        ));
+    }
+    Ok(())
+}
+
 fn profile_by_id(entries: &[StoredConnection], id: Uuid) -> Result<&StoredConnection> {
     entries
         .iter()
@@ -360,6 +429,7 @@ fn validate_profile(
         .clone()
         .or_else(|| current.map(|profile| profile.settings.clone()))
         .unwrap_or_default();
+    settings.managed_iam = None;
     settings.tenant = settings.tenant.trim().into();
     settings.account = settings.account.trim().into();
     settings.realm = settings.realm.trim().into();

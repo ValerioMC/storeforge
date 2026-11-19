@@ -12,8 +12,11 @@ import type { CephGroup } from '../../connection/model/workspace'
 import { administer } from '../api/administration'
 import { operations, type Operation } from '../model/operations'
 import AdminResponse from './AdminResponse.vue'
+import IamIdentities from './IamIdentities.vue'
+import IamPrivateAccess from './IamPrivateAccess.vue'
 
 const props = defineProps<{ connection?: Connection; bucket?: string; initialGroup?: CephGroup; demo: boolean; scope: 's3' | 'ceph' }>()
+const emit = defineEmits<{ open: [profile: Connection] }>()
 const group = ref<string>(props.initialGroup ?? 'IAM users')
 const selected = ref('')
 const values = ref<Record<string, string>>({})
@@ -26,7 +29,12 @@ let request = 0
 const available = computed(() => operations.filter(operation =>
   (props.scope === 'ceph') === (operation.protocol === 'rgw') &&
   (props.demo || identityAvailable(props.connection, operationIdentity(operation)))))
-const groups = computed(() => Array.from(new Set(available.value.map(operation => operation.group))))
+const groups = computed(() => {
+  const names = Array.from(new Set(available.value.map(operation => operation.group)))
+  return props.scope === 's3' && !props.demo && names.length
+    ? names.map(name => name === 'Access keys' ? 'Personal access' : name)
+    : names
+})
 const groupOperations = computed(() => available.value.filter(operation => operation.group === group.value))
 const actionOptions = computed(() => groupOperations.value.map(({ id, label }) => ({ value: id, label })))
 const operation = computed(() => groupOperations.value.find(item => item.id === selected.value))
@@ -112,7 +120,10 @@ async function execute(confirmed: boolean): Promise<void> {
         <div class="admin-body">
           <FadeRegion>
             <div :key="group">
-              <form class="panel-form" @submit.prevent="review">
+              <IamIdentities v-if="!demo && connection && (group === 'IAM users' || group === 'IAM groups')"
+                :connection="connection.id" :kind="group === 'IAM users' ? 'User' : 'Group'" @personal-access="group = 'Personal access'" />
+              <IamPrivateAccess v-else-if="!demo && connection && group === 'Personal access'" :profile="connection" @open="emit('open', $event)" />
+              <form v-else class="panel-form" @submit.prevent="review">
                 <div class="stage-heading">
                   <div><h2>{{ group }}</h2><p>{{ operation?.protocol === 'rgw' ? 'Manage the selected gateway using its RGW Admin Ops API.' : 'Manage resources within the selected account.' }}</p></div>
                   <span class="chip">{{ operation?.protocol.toUpperCase() }}</span>

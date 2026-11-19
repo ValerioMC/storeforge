@@ -21,6 +21,15 @@ export interface EndpointSettings {
   managerEnabled: boolean
   defaultWorkspace: Workspace | null
   coordinates?: EndpointCoordinates | null
+  managedIam?: ManagedIamOwner | null
+}
+
+export interface ManagedIamOwner {
+  provisioningId: string
+  administrator: string
+  userId: string
+  userName: string
+  accessKeyId: string
 }
 
 export interface ServiceIdentity {

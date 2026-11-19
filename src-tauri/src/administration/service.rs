@@ -11,6 +11,7 @@ use crate::{
 
 use super::{
     model::{AdminRequest, Operation, Protocol},
+    private_access::ensure_generic_iam_write,
     repository,
 };
 
@@ -48,6 +49,25 @@ impl AdministrationService {
             })
     }
 
+    pub(crate) async fn iam(
+        &self,
+        session: &Session,
+        action: &str,
+        values: BTreeMap<String, String>,
+    ) -> Result<String> {
+        let operation = self
+            .operations
+            .iter()
+            .find(|operation| operation.protocol == Protocol::Iam && operation.action == action)
+            .ok_or_else(|| AppError::Invalid("Unsupported IAM operation.".into()))?;
+        let values = if action == "GetUser" && values.is_empty() {
+            values
+        } else {
+            validate_request(operation, values, true, session.profile.provider)?
+        };
+        repository::execute(session, operation, &values).await
+    }
+
     pub async fn execute(
         &self,
         session: &Session,
@@ -61,6 +81,9 @@ impl AdministrationService {
             request.confirmed,
             session.profile.provider,
         )?;
+        if operation.protocol == Protocol::Iam && operation.write {
+            ensure_generic_iam_write(self, session, &operation.action, &values).await?;
+        }
         let result = repository::execute(session, operation, &values).await;
         tracing::info!(operation = %operation.label, connection = %session.context.connection_id, principal = %session.context.principal_id, success = result.is_ok(), "Administration request completed");
         audit.record(session.profile.id, &operation.label, None, result)
