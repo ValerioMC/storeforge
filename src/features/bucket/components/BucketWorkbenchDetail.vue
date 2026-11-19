@@ -5,13 +5,14 @@ import { errorMessage } from '../../../common/tauri'
 import { formatDate, formatSize } from '../../../common/format'
 import WorkspaceTabs from '../../../components/shell/WorkspaceTabs.vue'
 import Notice from '../../../components/ui/Notice.vue'
+import CephBucketActions from '../../administration/components/CephBucketActions.vue'
 import { scopedBucketConfiguration } from '../api/workbench'
 import type { Configuration, ConfigurationChange } from '../model/bucket'
 import type { WorkbenchRow } from '../model/workbench'
 import BucketSettings from './BucketSettings.vue'
 
 const props = defineProps<{ row: WorkbenchRow; tags: readonly string[]; previous?: string; next?: string; link: string }>()
-const emit = defineEmits<{ inspect: [key: string]; classify: [tags: string]; changed: [] }>()
+const emit = defineEmits<{ inspect: [key: string]; classify: [tags: string]; changed: []; inventoryChanged: [] }>()
 const tabs = [{ value: 'overview', label: 'Overview' }, { value: 'configuration', label: 'Configuration' }] as const
 const tab = ref<typeof tabs[number]['value']>('configuration')
 const settings = ref<InstanceType<typeof BucketSettings>>()
@@ -60,6 +61,7 @@ defineExpose({ dirty, busy, discard })
         <button type="button" @click="copyLink"><Link2 :size="16" /> Copy link</button>
       </div>
     </div>
+    <CephBucketActions v-if="row.target.source === 'cephAdmin'" :row="row" @changed="emit('inventoryChanged')" />
     <Notice v-if="feedback" :tone="feedbackError ? 'error' : 'info'">{{ feedback }}</Notice>
     <WorkspaceTabs v-model="tab" :tabs="tabs" label="Bucket details sections" />
     <div v-show="tab === 'overview'" class="panel-form">

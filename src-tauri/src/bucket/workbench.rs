@@ -15,7 +15,7 @@ use crate::{
 
 use super::{model::BucketQuota, quota::QuotaDocument, service::BucketService};
 
-#[derive(Clone, Copy, Deserialize, PartialEq)]
+#[derive(Clone, Copy, Deserialize, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub enum InventorySource {
     StorageOps,
@@ -38,7 +38,7 @@ impl InventorySource {
     }
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct BucketTarget {
     pub connection: Uuid,

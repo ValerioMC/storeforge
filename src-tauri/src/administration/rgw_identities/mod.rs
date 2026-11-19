@@ -1,5 +1,5 @@
 pub mod model;
-mod repository;
+pub(super) mod repository;
 mod service;
 
 pub use service::RgwIdentityService;

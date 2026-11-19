@@ -12,6 +12,8 @@ import EmptyState from '../../../components/ui/EmptyState.vue'
 import FadeRegion from '../../../components/ui/FadeRegion.vue'
 import Modal from '../../../components/ui/Modal.vue'
 import Notice from '../../../components/ui/Notice.vue'
+import CephIndexBatch from '../../administration/components/CephIndexBatch.vue'
+import { batchIndexTargets } from '../../administration/model/ceph-operations'
 import { providerNames, type Connection } from '../../connection/model/connection'
 import { saveBucketSelection } from '../api/workbench'
 import { useBucketClassifications } from '../composables/useBucketClassifications'
@@ -32,6 +34,7 @@ const { tags, saveTags } = useBucketClassifications(props.source)
 const details = ref<InstanceType<typeof BucketWorkbenchDetail>>()
 const campaign = ref<InstanceType<typeof BucketCampaign>>()
 const showCampaign = ref(false)
+const showIndexBatch = ref(false)
 const clipboard = shallowRef<CampaignSnapshot>()
 const query = ref(props.initialBucket ?? '')
 const match = ref<'contains' | 'exact'>(props.initialBucket ? 'exact' : 'contains')
@@ -64,6 +67,8 @@ const filteredRows = computed(() => filterWorkbenchRows(baseRows.value, '', 'con
 const pageCount = computed(() => Math.max(1, Math.ceil(filteredRows.value.length / pageSize)))
 const pageRows = computed(() => filteredRows.value.slice((page.value - 1) * pageSize, page.value * pageSize))
 const chosen = computed(() => rows.value.filter(row => selected.value.has(row.key)))
+const cephProfile = computed(() => props.source === 'cephAdmin' && profiles.value[0]?.id !== 'demo' ? profiles.value[0] : undefined)
+const indexTargets = computed(() => cephProfile.value ? batchIndexTargets(chosen.value, cephProfile.value) : [])
 const everyPageRow = computed(() => !!pageRows.value.length && pageRows.value.every(row => selected.value.has(row.key)))
 const selectedOnPage = computed(() => pageRows.value.some(row => selected.value.has(row.key)))
 const focused = computed(() => focusedRow(rows.value, props.target))
@@ -239,6 +244,7 @@ defineExpose({ dirty, busy: editing, discard })
           <button type="button" :disabled="!filteredRows.length || busy || coveragePending" @click="includeRows(filteredRows, true)">Select filtered</button>
           <button type="button" :disabled="!chosen.length" @click="selected = new Set()">Clear selection</button>
           <button type="button" :disabled="!chosen.length || busy" @click="showCampaign = true"><ClipboardList :size="15" /> New campaign</button>
+          <button v-if="cephProfile" type="button" :disabled="!indexTargets.length || busy" title="Select 1 to 200 current bucket instances" @click="showIndexBatch = true">Check indexes</button>
           <AppSelect v-model="exportFormat" :options="exportFormats" aria-label="Export format" />
           <button type="button" :disabled="!chosen.length || exportPending || exporting" @click="exportSelection"><Download :size="15" /> Export selection</button>
         </div>
@@ -280,6 +286,7 @@ defineExpose({ dirty, busy: editing, discard })
     <Notice v-if="actionError" tone="error">{{ actionError }}</Notice>
     <BucketCampaign v-if="showCampaign" ref="campaign" :rows="rows" :selection="chosen" :clipboard="clipboard"
       @close="showCampaign = false" @clipboard="value => clipboard = value" @result="applyResult" />
+    <CephIndexBatch v-if="showIndexBatch && cephProfile" :profile="cephProfile" :targets="indexTargets" @close="showIndexBatch = false" />
     <BucketWorkbenchFilters v-if="showFilters" :filters="filters" @close="showFilters = false" @apply="value => { filters = value; showFilters = false }" />
     <Modal v-if="target" :title="focused?.name ?? 'Bucket details'" drawer @close="emit('inspect')">
       <div class="modal-form">
@@ -287,7 +294,7 @@ defineExpose({ dirty, busy: editing, discard })
         <FadeRegion>
           <BucketWorkbenchDetail v-if="focused" :key="`${focused.key}:${focused.target.revision}`" ref="details" :row="focused"
             :tags="tags(focused)" :previous="previous?.key" :next="next?.key" :link="link" @inspect="emit('inspect', $event)"
-            @classify="classify(focused, $event)" @changed="invalidate(focused)" />
+            @classify="classify(focused, $event)" @changed="invalidate(focused)" @inventory-changed="refresh()" />
           <p v-else-if="busy" role="status">Finding the bucket in its registered context…</p>
           <Notice v-else>The bucket is unavailable in this context. Refresh the inventory to check again.</Notice>
         </FadeRegion>

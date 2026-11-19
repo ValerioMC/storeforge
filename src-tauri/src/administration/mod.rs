@@ -1,3 +1,4 @@
+mod ceph_operations;
 pub mod controller;
 mod iam_roles;
 pub(crate) mod model;

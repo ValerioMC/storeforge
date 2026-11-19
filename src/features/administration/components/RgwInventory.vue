@@ -10,12 +10,13 @@ import { changeRgwIdentity, listRgwIdentities, readRgwAccount, readRgwAccountUsa
 import { useQueryPage } from '../composables/useQueryPage'
 import { rgwTargetKey, rgwTargetLabel, rgwUserLabel, type RgwAccount, type RgwChange, type RgwKind, type RgwQuota, type RgwTarget, type RgwUser } from '../model/rgw'
 import QueryPager from './QueryPager.vue'
+import CephActionDialog from './CephActionDialog.vue'
 import RgwAccessKeys from './RgwAccessKeys.vue'
 import RgwIdentityEditor from './RgwIdentityEditor.vue'
 import RgwImport from './RgwImport.vue'
 import RgwQuotaEditor from './RgwQuotaEditor.vue'
 
-const props = defineProps<{ connection: string; kind: RgwKind; managed: boolean }>()
+const props = defineProps<{ connection: string; kind: RgwKind; managed: boolean; cephProfile?: Connection }>()
 const emit = defineEmits<{ open: [profile: Connection] }>()
 const { items, markers, nextMarker, loading, error: listError, search, next, previous, reload } = useQueryPage(
   () => [props.connection, props.kind, props.managed],
@@ -28,7 +29,11 @@ const related = ref<RgwTarget>()
 const account = ref<RgwAccount>()
 const user = ref<RgwUser>()
 const tab = ref('overview')
+const removing = ref(false)
 const detail = computed(() => account.value ?? user.value)
+const deleteSelection = computed(() => user.value
+  ? { kind: 'deleteUser' as const, identity: user.value.identity, account: user.value.account }
+  : account.value ? { kind: 'deleteAccount' as const, id: account.value.id, tenant: account.value.tenant } : undefined)
 const editor = ref<'create' | 'edit' | 'import' | 'quota' | 'bucketQuota'>()
 const busy = ref(false)
 const reading = ref(false)
@@ -150,6 +155,13 @@ function quotaLimit(value: number | null | undefined): string {
   if (value == null) return 'Unavailable'
   return value < 0 ? 'Unlimited' : value.toLocaleString()
 }
+
+function finishRemoval(changed: boolean): void {
+  removing.value = false
+  if (!changed) return
+  back()
+  void reload()
+}
 </script>
 
 <template>
@@ -191,6 +203,7 @@ function quotaLimit(value: number | null | undefined): string {
         <div class="panel-actions">
           <button :disabled="reading || readingUsage || busy" @click="read"><RefreshCw :size="15" /> Refresh details</button>
           <button v-if="detail" :disabled="reading || readingUsage || busy" @click="startEditor('edit')">Edit {{ selected.kind }}</button>
+          <button v-if="cephProfile && deleteSelection" type="button" class="danger-outline" :disabled="reading || readingUsage || busy" @click="removing = true">Delete {{ selected.kind }}</button>
         </div>
       </div>
       <Notice v-if="detailError" tone="error">{{ detailError }}</Notice>
@@ -243,6 +256,7 @@ function quotaLimit(value: number | null | undefined): string {
     <RgwIdentityEditor v-if="editor === 'create' || editor === 'edit'" :connection="connection" :kind="editor === 'edit' ? selected?.kind ?? kind : kind" :managed="managed"
       :account="editor === 'edit' ? account : undefined" :user="editor === 'edit' ? user : undefined" :busy="busy" :error="error" @close="editor = undefined" @save="save" />
     <RgwImport v-if="editor === 'import'" :connection="connection" :kind="kind" :busy="busy" :error="error" @close="editor = undefined" @save="save" />
+    <CephActionDialog v-if="removing && cephProfile && deleteSelection" :profile="cephProfile" :selection="deleteSelection" @close="finishRemoval" />
     <RgwQuotaEditor v-if="editor === 'quota' || editor === 'bucketQuota'"
       :label="editor === 'quota' ? quotas[0].label : quotas[1].label" :quota="editor === 'quota' ? quotas[0].quota : quotas[1].quota"
       :busy="busy" :error="error" @close="editor = undefined" @save="saveQuota" />

@@ -42,6 +42,28 @@ impl SignedClient {
         service: &str,
         request: http::Request<Vec<u8>>,
     ) -> Result<String> {
+        let (status, text) = self.send_document(session, service, request).await?;
+        match status {
+            StatusCode::NOT_FOUND => Err(AppError::Missing(format!(
+                "{} {}",
+                status,
+                truncate_error(&text)
+            ))),
+            status if status.is_success() => Ok(text),
+            _ => Err(AppError::Storage(format!(
+                "{} {}",
+                status,
+                truncate_error(&text)
+            ))),
+        }
+    }
+
+    pub(crate) async fn send_document(
+        &self,
+        session: &Session,
+        service: &str,
+        request: http::Request<Vec<u8>>,
+    ) -> Result<(StatusCode, String)> {
         let request = sign_request(session, service, request)?;
         let (parts, body) = request.into_parts();
         let response = self
@@ -124,7 +146,7 @@ fn sign_request(
     Ok(request)
 }
 
-async fn read_response(mut response: reqwest::Response) -> Result<String> {
+async fn read_response(mut response: reqwest::Response) -> Result<(StatusCode, String)> {
     const MAX_DOCUMENT_BYTES: usize = 8 * 1024 * 1024;
     let status = response.status();
     let mut bytes = Vec::new();
@@ -136,20 +158,7 @@ async fn read_response(mut response: reqwest::Response) -> Result<String> {
         }
         bytes.extend_from_slice(&chunk);
     }
-    let text = String::from_utf8_lossy(&bytes);
-    match status {
-        StatusCode::NOT_FOUND => Err(AppError::Missing(format!(
-            "{} {}",
-            status,
-            truncate_error(&text)
-        ))),
-        status if status.is_success() => Ok(text.into_owned()),
-        _ => Err(AppError::Storage(format!(
-            "{} {}",
-            status,
-            truncate_error(&text)
-        ))),
-    }
+    Ok((status, String::from_utf8_lossy(&bytes).into_owned()))
 }
 
 fn truncate_error(text: &str) -> String {

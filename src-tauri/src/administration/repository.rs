@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 
-use reqwest::Method;
+use reqwest::{Method, StatusCode};
 use url::Url;
 
 use crate::{
@@ -60,6 +60,43 @@ pub(crate) async fn rgw_request_with_body(
     filters: impl IntoIterator<Item = (impl AsRef<str>, impl AsRef<str>)>,
     json: Option<Vec<u8>>,
 ) -> Result<String> {
+    let request = rgw_document(session, method, resource, filters, json)?;
+    SignedClient::for_connection(&session.profile)?
+        .send(session, "s3", request)
+        .await
+}
+
+pub(crate) struct RgwClient<'a> {
+    session: &'a Session,
+    client: SignedClient,
+}
+
+impl<'a> RgwClient<'a> {
+    pub(crate) fn new(session: &'a Session) -> Result<Self> {
+        Ok(Self {
+            session,
+            client: SignedClient::for_connection(&session.profile)?,
+        })
+    }
+
+    pub(crate) async fn response(
+        &self,
+        method: Method,
+        resource: &str,
+        filters: impl IntoIterator<Item = (impl AsRef<str>, impl AsRef<str>)>,
+    ) -> Result<(StatusCode, String)> {
+        let request = rgw_document(self.session, method, resource, filters, None)?;
+        self.client.send_document(self.session, "s3", request).await
+    }
+}
+
+fn rgw_document(
+    session: &Session,
+    method: Method,
+    resource: &str,
+    filters: impl IntoIterator<Item = (impl AsRef<str>, impl AsRef<str>)>,
+    json: Option<Vec<u8>>,
+) -> Result<http::Request<Vec<u8>>> {
     let mut url = parse_endpoint(&session.profile.endpoint)?;
     url.path_segments_mut()
         .map_err(|_| AppError::Invalid("Invalid Ceph endpoint.".into()))?
@@ -70,13 +107,7 @@ pub(crate) async fn rgw_request_with_body(
         .append_pair("format", "json")
         .extend_pairs(filters);
     let content_type = json.as_ref().map(|_| "application/json");
-    SignedClient::for_connection(&session.profile)?
-        .send(
-            session,
-            "s3",
-            request(method, url, content_type, json.unwrap_or_default())?,
-        )
-        .await
+    request(method, url, content_type, json.unwrap_or_default())
 }
 
 async fn query(

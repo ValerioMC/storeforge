@@ -29,7 +29,6 @@ const error = ref('')
 const busy = ref(false)
 const response = ref<string>()
 const confirm = ref(false)
-const showExistingDelete = ref(false)
 let request = 0
 
 const available = computed(() => operations.filter(operation =>
@@ -45,8 +44,7 @@ const groups = computed(() => {
   return managerGroups
 })
 const clusterIdentity = computed(() => !props.demo && (group.value === 'Ceph accounts' || group.value === 'Ceph users'))
-const groupOperations = computed(() => available.value.filter(operation =>
-  operation.group === group.value && (!showExistingDelete.value || operation.method === 'DELETE')))
+const groupOperations = computed(() => available.value.filter(operation => operation.group === group.value))
 const actionOptions = computed(() => groupOperations.value.map(({ id, label }) => ({ value: id, label })))
 const operation = computed(() => groupOperations.value.find(item => item.id === selected.value))
 const sampleAvailable = computed(() => props.demo && operation.value?.id === 'ceph-buckets-inspect-bucket-statistics')
@@ -61,7 +59,6 @@ watch(groupOperations, items => {
   selected.value = items[0]?.id ?? ''
 }, { immediate: true })
 watch(selected, reset, { immediate: true })
-watch(group, () => { showExistingDelete.value = false })
 
 function operationIdentity(operation: Operation): IdentityKind {
   if (operation.protocol !== 'rgw') return 's3'
@@ -135,17 +132,15 @@ async function execute(confirmed: boolean): Promise<void> {
         <div class="admin-body">
           <FadeRegion>
             <div :key="group">
-              <div v-if="clusterIdentity" class="panel-actions">
-                <button type="button" :disabled="busy" @click="showExistingDelete = !showExistingDelete">{{ showExistingDelete ? 'Back to inventory' : 'Delete by ID' }}</button>
-              </div>
               <IamIdentities v-if="!demo && connection && (group === 'IAM users' || group === 'IAM groups')"
                 :connection="connection.id" :kind="group === 'IAM users' ? 'User' : 'Group'" @personal-access="group = 'Personal access'" />
               <IamPrivateAccess v-else-if="!demo && connection && group === 'Personal access'" :profile="connection" @open="emit('open', $event)" />
               <IamRoles v-else-if="!demo && connection && group === 'IAM roles'" :connection="connection.id" :provider="connection.provider" />
               <IamManagedPolicies v-else-if="!demo && connection && group === 'IAM policies'" :connection="connection.id" :provider="connection.provider" />
               <SnsTopics v-else-if="!demo && connection && group === 'Notifications'" :profile="connection" @notifications="(bucket, arn) => emit('notifications', bucket, arn)" />
-              <RgwInventory v-else-if="!showExistingDelete && connection && (clusterIdentity || group === 'Managed accounts' || group === 'Managed users')"
-                :connection="connection.id" :kind="group.endsWith('accounts') ? 'account' : 'user'" :managed="scope === 'managedRgw'" @open="emit('open', $event)" />
+              <RgwInventory v-else-if="connection && (clusterIdentity || group === 'Managed accounts' || group === 'Managed users')"
+                :connection="connection.id" :kind="group.endsWith('accounts') ? 'account' : 'user'" :managed="scope === 'managedRgw'"
+                :ceph-profile="clusterIdentity ? connection : undefined" @open="emit('open', $event)" />
               <RgwDelegatedKeys v-else-if="!demo && connection && group === 'Delegated RGW keys'" :connection="connection.id" @open="emit('open', $event)" />
               <form v-else class="panel-form" @submit.prevent="review">
                 <div class="stage-heading">
