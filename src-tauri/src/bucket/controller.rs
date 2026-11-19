@@ -15,9 +15,11 @@ use crate::{
         model::{IdentityKind, Workspace},
         service::ConnectionService,
     },
+    monitoring::model::{BucketUsage, Reading},
 };
 
 use super::{
+    campaign::{self, ConfigurationUpdate},
     model::{
         Bucket, BucketCreation, BucketQuota, BucketQuotaUpdate, Configuration, ConfigurationChange,
     },
@@ -77,6 +79,62 @@ pub async fn bucket_workbench_configuration(
         );
     }
     result
+}
+
+#[tauri::command]
+pub async fn apply_bucket_campaign_configuration(
+    audit: State<'_, AuditService>,
+    connections: State<'_, Arc<ConnectionService>>,
+    target: BucketTarget,
+    update: ConfigurationUpdate,
+) -> Result<String> {
+    let session = workbench_session(&connections, &target, IdentityKind::S3).await?;
+    let result = campaign::apply_configuration(&session, &target.name, update).await;
+    audit.record(
+        target.connection,
+        "Apply bucket campaign configuration",
+        Some(target.name),
+        result,
+    )
+}
+
+#[tauri::command]
+pub async fn bucket_campaign_quota(
+    connections: State<'_, Arc<ConnectionService>>,
+    target: BucketTarget,
+) -> Result<BucketQuota> {
+    let session = workbench_session(&connections, &target, IdentityKind::CephAdmin).await?;
+    quota::read(&session, &target.name).await
+}
+
+#[tauri::command]
+pub async fn apply_bucket_campaign_quota(
+    audit: State<'_, AuditService>,
+    connections: State<'_, Arc<ConnectionService>>,
+    target: BucketTarget,
+    update: BucketQuotaUpdate,
+) -> Result<BucketQuota> {
+    let session = workbench_session(&connections, &target, IdentityKind::CephAdmin).await?;
+    let result = async {
+        quota::write(&session, &target.name, update).await?;
+        quota::read(&session, &target.name).await
+    }
+    .await;
+    audit.record(
+        target.connection,
+        "Apply bucket campaign quota",
+        Some(target.name),
+        result,
+    )
+}
+
+#[tauri::command]
+pub async fn recalculate_bucket_campaign_usage(
+    connections: State<'_, Arc<ConnectionService>>,
+    target: BucketTarget,
+) -> Result<Reading<BucketUsage>> {
+    let session = workbench_session(&connections, &target, IdentityKind::S3).await?;
+    Ok(campaign::recalculate_usage(&session, target.name).await)
 }
 
 async fn workbench_session(

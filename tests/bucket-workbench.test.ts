@@ -2,6 +2,7 @@
 
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { createApp, h, nextTick, ref } from 'vue'
+import { campaignGateway } from '../src/features/bucket/api/campaigns'
 import { saveBucketSelection, scopedBucketConfiguration, streamBucketInventory } from '../src/features/bucket/api/workbench'
 import BucketWorkbench from '../src/features/bucket/components/BucketWorkbench.vue'
 import { useBucketClassifications } from '../src/features/bucket/composables/useBucketClassifications'
@@ -11,6 +12,7 @@ import { isWorkspaceRoute } from '../src/features/connection/model/workspace'
 import { readMonitoring } from '../src/features/monitoring/api/monitoring'
 
 vi.mock('../src/features/bucket/api/workbench')
+vi.mock('../src/features/bucket/api/campaigns')
 vi.mock('../src/features/monitoring/api/monitoring')
 
 const north = profile('north', 'North', 'tenant-north')
@@ -110,7 +112,7 @@ it('filters equal bucket names by lifecycle state and KMS key and exports visibl
   await vi.waitFor(() => expect(button('Export selection').disabled).toBe(false))
   button('Export selection').click()
   await vi.waitFor(() => expect(saveBucketSelection).toHaveBeenCalledWith('csv', expect.stringContaining('"Lifecycle rules","KMS key"')))
-  expect(vi.mocked(saveBucketSelection).mock.calls[0][1]).toContain('"same-name","North","tenant-north"')
+  expect(vi.mocked(saveBucketSelection).mock.calls[0]![1]).toContain('"same-name","North","tenant-north"')
 
   await choose('Export format', 'JSON')
   button('Clear selection').click()
@@ -124,7 +126,7 @@ it('filters equal bucket names by lifecycle state and KMS key and exports visibl
   await vi.waitFor(() => expect(button('Export selection').disabled).toBe(false))
   button('Export selection').click()
   await vi.waitFor(() => expect(saveBucketSelection).toHaveBeenCalledTimes(2))
-  expect(JSON.parse(vi.mocked(saveBucketSelection).mock.calls[1][1])).toEqual([
+  expect(JSON.parse(vi.mocked(saveBucketSelection).mock.calls[1]![1])).toEqual([
     expect.objectContaining({ Bucket: 'same-name', Context: 'South', 'KMS key': 'east:key/32' }),
   ])
 })
@@ -165,7 +167,30 @@ it('shares local tags by physical endpoint within the workspace and tenant', () 
   const otherTenant = makeWorkbenchRow(south, 'storageOps', bucket('same-name', 'tenant-south'))
   classifications.saveTags(original, 'archive, production, archive')
   expect(classifications.tags(alias)).toEqual(['archive', 'production'])
+  const moved = makeWorkbenchRow({ ...north, endpointId: 'different-endpoint' }, 'storageOps', bucket('same-name', 'tenant-north'))
+  expect(moved.key).not.toBe(original.key)
+  expect(classifications.tags(moved)).toEqual([])
   expect(classifications.tags(otherTenant)).toEqual([])
   expect(useBucketClassifications('cephAdmin').tags(original)).toEqual([])
   expect(scopedBucketConfiguration).not.toHaveBeenCalled()
+})
+
+
+it('reads privileged quotas when a capacity audit needs them', async () => {
+  const privileged: Connection = { ...north, services: { cephAdmin: {
+    principalId: 'privileged', endpoint: north.endpoint, enabled: true, managedExternally: false, capability: 'detected',
+  } } }
+  vi.mocked(streamBucketInventory).mockImplementation(async (profile, _, receive) => {
+    receive([{ ...bucket('same-name', profile.settings!.tenant), bytes: 80 }])
+  })
+  vi.mocked(campaignGateway.quota).mockResolvedValue({ enabled: true, maxBytes: '100', maxObjects: '' })
+  show([privileged, south])
+  await vi.waitFor(() => expect(document.querySelectorAll('.register-panel tbody tr')).toHaveLength(2))
+  button('Filters').click()
+  await choose('Audit filters', 'Storage quota at least 80% used')
+  document.querySelector('dialog form')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }))
+  await vi.waitFor(() => expect(document.querySelectorAll('.register-panel tbody tr')).toHaveLength(1))
+  expect(document.querySelector('.register-panel tbody')?.textContent).toContain('North')
+  expect(campaignGateway.quota).toHaveBeenCalledTimes(1)
+  expect(campaignGateway.quota).toHaveBeenCalledWith(expect.objectContaining({ target: expect.objectContaining({ connection: 'north' }) }))
 })

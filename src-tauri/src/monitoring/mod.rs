@@ -1,8 +1,8 @@
-mod collection;
+pub(crate) mod collection;
 pub(crate) mod controller;
 mod health;
 mod history;
-mod model;
+pub(crate) mod model;
 mod repository;
 mod rgw;
 pub(crate) mod service;

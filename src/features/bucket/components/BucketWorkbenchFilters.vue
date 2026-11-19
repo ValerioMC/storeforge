@@ -1,14 +1,21 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { ref, watch } from 'vue'
 import { Plus, X } from 'lucide-vue-next'
 import AppSelect from '../../../components/ui/AppSelect.vue'
 import Modal from '../../../components/ui/Modal.vue'
-import { filtersOperators, workbenchColumns, type WorkbenchFilter } from '../model/workbench'
+import { filtersOperators, workbenchAuditPresets, workbenchColumns, type WorkbenchFilter } from '../model/workbench'
 
 const props = defineProps<{ filters: WorkbenchFilter[] }>()
 const emit = defineEmits<{ close: []; apply: [filters: WorkbenchFilter[]] }>()
 const draft = ref(props.filters.map(filter => ({ ...filter })))
+const preset = ref('')
+const presets = [{ value: '', label: 'Choose an audit filter' }, ...workbenchAuditPresets.map(({ id, label }) => ({ value: id, label }))]
 const fields = workbenchColumns.map(column => ({ value: column.id, label: column.label }))
+
+watch(preset, id => {
+  const selected = workbenchAuditPresets.find(item => item.id === id)
+  if (selected) draft.value = selected.filters.map(filter => ({ ...filter }))
+})
 
 function add(): void {
   draft.value.push({ field: 'lifecycle', operator: 'contains', query: '' })
@@ -22,7 +29,8 @@ function apply(): void {
 <template>
   <Modal title="Advanced bucket filters" wide @close="emit('close')">
     <form class="modal-form" @submit.prevent="apply">
-      <p class="muted">Buckets must match every filter. Use bytes for storage size and whole percentages for quota usage.</p>
+      <label class="audit-filter">Audit filters <AppSelect v-model="preset" :options="presets" aria-label="Audit filters" /></label>
+      <p class="muted">Buckets must match every filter. Use bytes for storage size and percentages for quota usage.</p>
       <p v-if="!draft.length">No advanced filters.</p>
       <div v-for="(filter, index) in draft" :key="index" class="filter-rule">
         <AppSelect v-model="filter.field" :options="fields" :aria-label="`Filter ${index + 1} field`" />
@@ -40,6 +48,7 @@ function apply(): void {
 </template>
 
 <style scoped>
+.audit-filter { display: grid; gap: 5px; }
 .filter-rule { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, .8fr) minmax(0, 1fr) auto; align-items: center; gap: 8px; }
 @media (max-width: 540px) {
   .filter-rule { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }

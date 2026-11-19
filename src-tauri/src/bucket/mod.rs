@@ -1,3 +1,4 @@
+mod campaign;
 pub mod controller;
 pub mod model;
 mod quota;

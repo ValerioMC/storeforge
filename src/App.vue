@@ -50,7 +50,7 @@ const startError = ref('')
 const browserView = ref<InstanceType<typeof BrowserWorkspace>>()
 const managerView = ref<InstanceType<typeof ManagerWorkspace>>()
 const workbenchView = ref<InstanceType<typeof BucketWorkbench>>()
-const bucketEditor = computed(() => workbenchRoute.value?.target ? workbenchView.value : managerView.value)
+const bucketEditor = computed(() => workbenchRoute.value ? workbenchView.value : managerView.value)
 const departure = ref<() => void>()
 const demo = computed(() => connections.activeId === 'demo')
 const contextOptions = computed(() => [

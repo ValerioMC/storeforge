@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { computed, ref, watch, watchEffect } from 'vue'
-import { ChevronLeft, ChevronRight, Columns3, Database, Download, Filter, RefreshCw, Server } from 'lucide-vue-next'
+import { computed, ref, shallowRef, watch, watchEffect } from 'vue'
+import { ChevronLeft, ChevronRight, ClipboardList, Columns3, Database, Download, Filter, RefreshCw, Server } from 'lucide-vue-next'
 import { formatDate, formatSize } from '../../../common/format'
 import { errorMessage } from '../../../common/tauri'
 import WorkspaceHeader from '../../../components/shell/WorkspaceHeader.vue'
@@ -17,17 +17,22 @@ import { saveBucketSelection } from '../api/workbench'
 import { useBucketClassifications } from '../composables/useBucketClassifications'
 import { useBucketWorkbench } from '../composables/useBucketWorkbench'
 import type { Configuration } from '../model/bucket'
+import type { CampaignSnapshot } from '../model/campaign'
 import { adjacentRow, defaultColumns, exportWorkbenchRows, filterWorkbenchRows, focusedRow, rowCell, workbenchColumns,
   type ExportFormat, type InventorySource, type WorkbenchFilter, type WorkbenchRow } from '../model/workbench'
+import BucketCampaign from './BucketCampaign.vue'
 import BucketWorkbenchDetail from './BucketWorkbenchDetail.vue'
 import BucketWorkbenchFilters from './BucketWorkbenchFilters.vue'
 
 const props = defineProps<{ profiles: Connection[]; source: InventorySource; pane: 'overview' | 'buckets'; target?: string; initialBucket?: string; compact?: boolean; link: string }>()
 const emit = defineEmits<{ overview: []; inventory: []; inspect: [key?: string]; connections: [] }>()
 const profiles = computed(() => props.profiles)
-const { snapshots, rows, busy, refresh, enrich, reading, invalidate } = useBucketWorkbench(profiles, props.source)
+const { snapshots, rows, busy, refresh, enrich, reading, invalidate, applyResult, quotaPending, quotaError } = useBucketWorkbench(profiles, props.source)
 const { tags, saveTags } = useBucketClassifications(props.source)
 const details = ref<InstanceType<typeof BucketWorkbenchDetail>>()
+const campaign = ref<InstanceType<typeof BucketCampaign>>()
+const showCampaign = ref(false)
+const clipboard = shallowRef<CampaignSnapshot>()
 const query = ref(props.initialBucket ?? '')
 const match = ref<'contains' | 'exact'>(props.initialBucket ? 'exact' : 'contains')
 const context = ref('')
@@ -45,7 +50,9 @@ const searchModes = [{ value: 'contains', label: 'Contains' }, { value: 'exact',
 const exportFormats = [{ value: 'csv', label: 'CSV' }, { value: 'json', label: 'JSON' }, { value: 'text', label: 'Plain text' }] as const
 const visibleColumns = computed(() => workbenchColumns.filter(column => columns.value.includes(column.id)))
 const contextOptions = computed(() => [{ value: '', label: 'All contexts' }, ...profiles.value.map(profile => ({ value: profile.id, label: profile.name }))])
-const featureFilters = computed(() => filters.value.filter(filter => workbenchColumns.some(column => column.id === filter.field && column.section)))
+const featureFilters = computed(() => filters.value.filter(filter => workbenchColumns.some(column => column.id === filter.field && (column.section || column.quota))))
+const requiredQuota = computed(() => featureFilters.value.some(filter => workbenchColumns.some(column => column.id === filter.field && column.quota)))
+const optionalQuota = computed(() => visibleColumns.value.some(column => column.quota))
 const baseRows = computed(() => filterWorkbenchRows(rows.value, query.value, match.value, context.value,
   filters.value.filter(filter => !featureFilters.value.includes(filter)), reading, tags))
 const requiredFeatures = computed(() => new Set(filters.value.flatMap(filter => {
@@ -62,10 +69,10 @@ const selectedOnPage = computed(() => pageRows.value.some(row => selected.value.
 const focused = computed(() => focusedRow(rows.value, props.target))
 const previous = computed(() => props.target ? adjacentRow(filteredRows.value, props.target, -1) : undefined)
 const next = computed(() => props.target ? adjacentRow(filteredRows.value, props.target, 1) : undefined)
-const coveragePending = computed(() => baseRows.value.some(row => incomplete(row, requiredFeatures.value)))
-const exportPending = computed(() => chosen.value.some(row => incomplete(row, optionalFeatures.value)))
+const coveragePending = computed(() => baseRows.value.some(row => incomplete(row, requiredFeatures.value) || requiredQuota.value && quotaPending(row)))
+const exportPending = computed(() => chosen.value.some(row => incomplete(row, optionalFeatures.value) || optionalQuota.value && quotaPending(row)))
 const dirty = computed(() => !!details.value?.dirty)
-const editing = computed(() => !!details.value?.busy)
+const editing = computed(() => !!details.value?.busy || !!campaign.value?.busy)
 const contexts = computed(() => profiles.value.map(profile => ({ profile, snapshot: snapshots.get(profile.id) })))
 
 watch(() => props.initialBucket, bucket => {
@@ -88,8 +95,8 @@ watch(() => profiles.value.map(profile => [profile.id, profile.revision] as cons
 })
 watchEffect(() => {
   if (props.pane !== 'buckets') return
-  enrich(baseRows.value, requiredFeatures.value)
-  enrich([...pageRows.value, ...chosen.value], optionalFeatures.value)
+  enrich(baseRows.value, requiredFeatures.value, requiredQuota.value)
+  enrich([...pageRows.value, ...chosen.value], optionalFeatures.value, optionalQuota.value)
 })
 
 function incomplete(row: WorkbenchRow, sections: ReadonlySet<Configuration>): boolean {
@@ -131,12 +138,22 @@ function includeColumn(id: string, checked: boolean): void {
 
 function displayCell(column: typeof workbenchColumns[number], row: WorkbenchRow): string {
   const value = rowCell(column, row, reading, tags)
-  if (value === null) return column.section && incomplete(row, new Set([column.section])) ? 'Reading…' : '—'
+  if (value === null) {
+    if (column.section && !reading(row, column.section) || column.quota && quotaPending(row)) return 'Reading…'
+    if (column.quota && quotaError(row)) return 'Read error'
+    return '—'
+  }
   if (column.id === 'bytes') return formatSize(row.bytes)
   if (column.id === 'created') return formatDate(row.createdAt)
   if (typeof value === 'number') return value.toLocaleString()
   if (typeof value === 'boolean') return value ? 'Yes' : 'No'
   return value || '—'
+}
+
+function cellError(column: typeof workbenchColumns[number], row: WorkbenchRow): string | undefined {
+  if (column.quota) return quotaError(row)
+  const feature = column.section && reading(row, column.section)
+  return feature && feature.status === 'error' ? feature.message : undefined
 }
 
 async function exportSelection(): Promise<void> {
@@ -221,6 +238,7 @@ defineExpose({ dirty, busy: editing, discard })
         <div class="panel-actions">
           <button type="button" :disabled="!filteredRows.length || busy || coveragePending" @click="includeRows(filteredRows, true)">Select filtered</button>
           <button type="button" :disabled="!chosen.length" @click="selected = new Set()">Clear selection</button>
+          <button type="button" :disabled="!chosen.length || busy" @click="showCampaign = true"><ClipboardList :size="15" /> New campaign</button>
           <AppSelect v-model="exportFormat" :options="exportFormats" aria-label="Export format" />
           <button type="button" :disabled="!chosen.length || exportPending || exporting" @click="exportSelection"><Download :size="15" /> Export selection</button>
         </div>
@@ -237,7 +255,7 @@ defineExpose({ dirty, busy: editing, discard })
               <td><input type="checkbox" :aria-label="`Select ${row.name} in ${row.profile.name}, ${row.tenant || 'default tenant'}`"
                 :checked="selected.has(row.key)" @change="includeRows([row], getChecked($event))" /></td>
               <th scope="row"><button class="subtle bucket-record" type="button" @click="emit('inspect', row.key)"><Database :size="16" />{{ row.name }}</button></th>
-              <td v-for="column in visibleColumns.slice(1)" :key="column.id" :title="column.section && reading(row, column.section)?.status === 'error' ? (reading(row, column.section) as { message: string }).message : undefined">
+              <td v-for="column in visibleColumns.slice(1)" :key="column.id" :title="cellError(column, row)">
                 {{ displayCell(column, row) }}
               </td>
             </tr>
@@ -260,6 +278,8 @@ defineExpose({ dirty, busy: editing, discard })
       <Notice v-if="snapshot?.usageError">{{ profile.name }} usage · {{ snapshot.usageError }}</Notice>
     </template>
     <Notice v-if="actionError" tone="error">{{ actionError }}</Notice>
+    <BucketCampaign v-if="showCampaign" ref="campaign" :rows="rows" :selection="chosen" :clipboard="clipboard"
+      @close="showCampaign = false" @clipboard="value => clipboard = value" @result="applyResult" />
     <BucketWorkbenchFilters v-if="showFilters" :filters="filters" @close="showFilters = false" @apply="value => { filters = value; showFilters = false }" />
     <Modal v-if="target" :title="focused?.name ?? 'Bucket details'" drawer @close="emit('inspect')">
       <div class="modal-form">

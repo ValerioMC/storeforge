@@ -44,6 +44,7 @@ interface Column {
   id: string
   label: string
   section?: Configuration
+  quota?: boolean
   value: (row: WorkbenchRow, reading: Feature | undefined, tags: readonly string[]) => Cell
 }
 
@@ -59,11 +60,11 @@ export const workbenchColumns = [
   { id: 'created', label: 'Created', value: row => row.createdAt },
   { id: 'bytes', label: 'Storage bytes', value: row => row.bytes },
   { id: 'objects', label: 'Objects', value: row => row.objects },
-  { id: 'quota', label: 'Quota enforcement', value: row => row.quota?.enabled ?? null },
-  { id: 'quotaBytes', label: 'Quota bytes', value: row => row.quota ? row.quota.maxBytes || 'Unlimited' : null },
-  { id: 'quotaObjects', label: 'Quota objects', value: row => row.quota ? row.quota.maxObjects || 'Unlimited' : null },
-  { id: 'quotaUsed', label: 'Storage quota used (%)', value: row => quotaPercent(row.bytes, row.quota?.maxBytes, row.quota?.enabled) },
-  { id: 'quotaObjectsUsed', label: 'Object quota used (%)', value: row => quotaPercent(row.objects, row.quota?.maxObjects, row.quota?.enabled) },
+  { id: 'quota', quota: true, label: 'Quota enforcement', value: row => row.quota?.enabled ?? null },
+  { id: 'quotaBytes', quota: true, label: 'Quota bytes', value: row => row.quota ? row.quota.maxBytes || 'Unlimited' : null },
+  { id: 'quotaObjects', quota: true, label: 'Quota objects', value: row => row.quota ? row.quota.maxObjects || 'Unlimited' : null },
+  { id: 'quotaUsed', quota: true, label: 'Storage quota used (%)', value: row => quotaPercent(row.bytes, row.quota?.maxBytes, row.quota?.enabled) },
+  { id: 'quotaObjectsUsed', quota: true, label: 'Object quota used (%)', value: row => quotaPercent(row.objects, row.quota?.maxObjects, row.quota?.enabled) },
   { id: 'uiTags', label: 'UI tags', value: (_, __, tags) => tags.join(', ') },
   { id: 'nativeTags', label: 'S3 tags', section: 'tagging', value: (_, reading) => nativeTags(reading) },
   { id: 'versioning', label: 'Versioning', section: 'versioning', value: (_, reading) => featureLabel(reading) },
@@ -84,6 +85,7 @@ export const workbenchColumns = [
   { id: 'publicAcl', label: 'ACL grants to public groups', section: 'acl', value: (_, reading) => publicAcl(reading) },
   { id: 'cors', label: 'CORS', section: 'cors', value: (_, reading) => featureLabel(reading) },
   { id: 'notification', label: 'Notification destinations', section: 'notification', value: (_, reading) => xmlValues(reading, 'notification', 'Topic', 'Queue', 'CloudFunction') },
+  { id: 'notificationState', label: 'Notification configuration', section: 'notification', value: (_, reading) => featureLabel(reading) },
   { id: 'logging', label: 'Access logging', section: 'logging', value: (_, reading) => featureLabel(reading) },
   { id: 'replication', label: 'Replication', section: 'replication', value: (_, reading) => featureLabel(reading) },
 ] satisfies Column[] as Column[]
@@ -99,11 +101,23 @@ export const filtersOperators = [
 export type FilterOperator = typeof filtersOperators[number]['value']
 export interface WorkbenchFilter { field: string; operator: FilterOperator; query: string }
 
+export const workbenchAuditPresets: { id: string; label: string; filters: WorkbenchFilter[] }[] = [
+  { id: 'retention', label: 'Lifecycle expiration enabled', filters: [{ field: 'retention', operator: 'exact', query: 'Enabled' }] },
+  { id: 'object-lock', label: 'Object Lock enabled', filters: [{ field: 'objectLock', operator: 'exact', query: 'Enabled' }] },
+  { id: 'multipart', label: 'Multipart cleanup enabled', filters: [{ field: 'multipart', operator: 'exact', query: 'Enabled' }] },
+  { id: 'public-policy', label: 'Public exposure · wildcard policy grants', filters: [{ field: 'policyPublic', operator: 'exact', query: 'true' }] },
+  { id: 'public-acl', label: 'Public exposure · public ACL grants', filters: [{ field: 'publicAcl', operator: 'exact', query: 'true' }] },
+  { id: 'notifications', label: 'Notifications configured', filters: [{ field: 'notificationState', operator: 'exact', query: 'Configured' }] },
+  { id: 'quota', label: 'Storage quota at least 80% used', filters: [{ field: 'quotaUsed', operator: 'gte', query: '80' }] },
+  { id: 'encryption', label: 'Default encryption unconfigured', filters: [{ field: 'encryption', operator: 'exact', query: 'Not configured' }] },
+  { id: 'kms', label: 'KMS encryption', filters: [{ field: 'encryption', operator: 'contains', query: 'kms' }] },
+]
+
 export function makeWorkbenchRow(profile: Connection, source: InventorySource, bucket: InventoryBucket): WorkbenchRow {
   const target: BucketTarget = { connection: profile.id, revision: profile.revision ?? null, source, tenant: bucket.tenant, name: bucket.name, instance: bucket.instance }
   const bound = bucket.tenant === (profile.settings?.tenant ?? '') && (source !== 'cephAdmin' || !!bucket.instance)
   return {
-    ...bucket, key: JSON.stringify([profile.id, bucket.tenant, bucket.name, bucket.instance]), target, profile,
+    ...bucket, key: JSON.stringify([profile.id, profile.endpointId ?? profile.id, profile.settings?.account ?? '', bucket.tenant, bucket.name, bucket.instance]), target, profile,
     configurationAvailable: bound && identityAvailable(profile, 's3'),
     quotaAvailable: bound && identityAvailable(profile, 'cephAdmin'),
   }
