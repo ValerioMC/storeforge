@@ -22,6 +22,7 @@ export interface EndpointSettings {
   defaultWorkspace: Workspace | null
   coordinates?: EndpointCoordinates | null
   managedIam?: ManagedIamOwner | null
+  managedRgw?: ManagedRgwOwner | null
 }
 
 export interface ManagedIamOwner {
@@ -29,6 +30,14 @@ export interface ManagedIamOwner {
   administrator: string
   userId: string
   userName: string
+  accessKeyId: string
+}
+
+export interface ManagedRgwOwner {
+  administrator: string
+  tenant: string
+  uid: string
+  account: string
   accessKeyId: string
 }
 

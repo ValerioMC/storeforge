@@ -4,7 +4,7 @@ import { executionContext, identityAvailable, type Connection } from './connecti
 export type DesktopWorkspace = 'browser' | 'manager' | 'cephAdmin' | 'admin'
 export type ManagerPage = 'overview' | 'buckets' | 'featureRules' | 'access' | 'tools' | 'metrics'
 export type CephPage = 'overview' | 'resources' | 'metrics' | 'health'
-export type AdminPage = 'overview' | 'connections' | 'preferences' | 'activity' | 'metrics' | 'health'
+export type AdminPage = 'overview' | 'connections' | 'preferences' | 'activity' | 'metrics' | 'health' | 'rgwIdentities'
 export type MetricPage = 'usage' | 'history' | 'traffic' | 'cost'
 export type CephGroup = 'Ceph accounts' | 'Ceph users' | 'Ceph buckets'
 export type WorkspaceDestination =
@@ -25,6 +25,7 @@ const cephPages: Record<CephPage, string> = {
 }
 export const adminPages: Record<AdminPage, string> = {
   overview: 'Overview', metrics: 'Usage & metrics', health: 'Endpoint health', connections: 'Connections', preferences: 'Preferences', activity: 'Activity',
+  rgwIdentities: 'Managed RGW identities',
 }
 
 export function workspaceAvailable(profile: Connection | undefined, workspace: DesktopWorkspace): boolean {

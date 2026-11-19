@@ -1,9 +1,10 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
-import { Activity, Box, Cable, ChevronDown, Database, FolderCog, KeyRound, LayoutDashboard, Plus, Search, Settings2, ShieldCheck, SlidersHorizontal, Star } from 'lucide-vue-next'
+import { Activity, Box, Cable, ChevronDown, Database, FolderCog, KeyRound, LayoutDashboard, Plus, Search, Settings2, ShieldCheck, SlidersHorizontal, Star, Users } from 'lucide-vue-next'
 import icon from '../../assets/storeforge.png'
 import { useBrowser } from '../../features/browser/store/browser'
 import { useConnections } from '../../features/connection/store/connections'
+import { identityAvailable } from '../../features/connection/model/connection'
 import { workspaceAvailable, type WorkspaceDestination, type WorkspaceRoute } from '../../features/connection/model/workspace'
 
 const props = defineProps<{ route: WorkspaceRoute; demo: boolean; hasDraft: boolean; dragRegion?: string }>()
@@ -26,13 +27,16 @@ const adminLinks = [
   { label: 'Access & topics', icon: KeyRound, destination: { workspace: 'manager', page: 'access' } },
   { label: 'Ceph Admin', icon: ShieldCheck, destination: { workspace: 'cephAdmin' } },
   { label: 'Admin overview', icon: LayoutDashboard, destination: { workspace: 'admin', page: 'overview' } },
+  { label: 'Managed RGW identities', icon: Users, destination: { workspace: 'admin', page: 'rgwIdentities' } },
   { label: 'Connections', icon: Cable, destination: { workspace: 'admin', page: 'connections' } },
   { label: 'Activity', icon: Activity, destination: { workspace: 'admin', page: 'activity' } },
   { label: 'Preferences', icon: Settings2, destination: { workspace: 'admin', page: 'preferences' } },
 ] as const
 const groups = computed(() => [
   { id: 'storage' as const, name: 'Storage', links: storageLinks.filter(({ destination }) => workspaceAvailable(connections.active, destination.workspace)) },
-  { id: 'administration' as const, name: 'Administration', links: adminLinks.filter(({ destination }) => workspaceAvailable(connections.active, destination.workspace)) },
+  { id: 'administration' as const, name: 'Administration', links: adminLinks.filter(({ destination }) =>
+    workspaceAvailable(connections.active, destination.workspace) &&
+    (!('page' in destination) || destination.page !== 'rgwIdentities' || identityAvailable(connections.active, 'adminOps'))) },
 ].filter(group => group.links.length))
 const expanded = ref({ storage: groupOpen('storage'), administration: groupOpen('administration'), buckets: groupOpen('buckets') })
 const buckets = computed(() => browser.buckets.filter(bucket =>

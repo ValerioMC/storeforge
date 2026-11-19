@@ -20,8 +20,8 @@ use crate::common::error::{AppError, Result};
 use super::{
     model::{
         CapabilityState, Connection, ConnectionCheck, ConnectionDraft, ExecutionContext,
-        IdentityKind, ManagedIamOwner, Provider, Secret, ServiceDraft, ServiceIdentity,
-        StoredConnection, Workspace,
+        IdentityKind, ManagedIamOwner, ManagedRgwOwner, Provider, Secret, ServiceDraft,
+        ServiceIdentity, StoredConnection, Workspace,
     },
     repository::{ConnectionRepository, CredentialRepository, KeyringRepository},
 };
@@ -124,23 +124,38 @@ impl ConnectionService {
         workspaces: (bool, bool),
         secret: Secret,
     ) -> Result<Connection> {
-        validate_secret(&secret)?;
-        let id = owner.provisioning_id;
-        let mut profile = parent.clone();
-        profile.id = id;
-        profile.endpoint_id = Some(parent.endpoint_id());
-        profile.revision = Some(Uuid::new_v4());
-        profile.name = name;
-        profile.s3_capability = CapabilityState::Unknown;
-        profile.known_buckets.clear();
-        profile.services.clear();
-        profile.settings.default_endpoint = false;
-        (
-            profile.settings.browser_enabled,
-            profile.settings.manager_enabled,
-        ) = workspaces;
-        profile.settings.default_workspace = None;
+        let mut profile = managed_profile(parent, owner.provisioning_id, name, workspaces);
         profile.settings.managed_iam = Some(owner);
+        self.save_managed(profile, secret)
+    }
+
+    pub(crate) fn save_managed_rgw(
+        &self,
+        session: &Session,
+        id: Uuid,
+        name: String,
+        owner: ManagedRgwOwner,
+        secret: Secret,
+    ) -> Result<Connection> {
+        let mut profile = self.with_profile(session.context.connection_id, |parent| {
+            if parent.revision != session.profile.revision
+                || parent.endpoint_id() != session.context.endpoint_id
+            {
+                return Err(AppError::Invalid(
+                    "The RGW connection changed during key provisioning.".into(),
+                ));
+            }
+            Ok(managed_profile(parent, id, name, (true, false)))
+        })?;
+        profile.settings.tenant.clone_from(&owner.tenant);
+        profile.settings.account.clone_from(&owner.account);
+        profile.settings.managed_rgw = Some(owner);
+        self.save_managed(profile, secret)
+    }
+
+    fn save_managed(&self, profile: Connection, secret: Secret) -> Result<Connection> {
+        validate_secret(&secret)?;
+        let id = profile.id;
         self.credentials.write(id, &secret)?;
         match self.repository.update(|entries| {
             entries.push(StoredConnection {
@@ -159,10 +174,31 @@ impl ConnectionService {
     }
 
     pub(crate) fn remove_managed_iam(&self, id: Uuid) -> Result<()> {
+        self.remove_managed(id, |profile| profile.settings.managed_iam.is_some())
+    }
+
+    pub(crate) fn remove_managed_rgw(&self, id: Uuid) -> Result<()> {
         self.repository.update(|entries| {
-            if let Some(position) = entries.iter().position(|entry| {
-                entry.profile.id == id && entry.profile.settings.managed_iam.is_some()
-            }) {
+            if let Some(position) = entries.iter().position(|entry| entry.profile.id == id) {
+                if entries[position].profile.settings.managed_rgw.is_none() {
+                    return Err(AppError::Invalid(
+                        "The local profile is no longer a managed RGW connection.".into(),
+                    ));
+                }
+                entries.remove(position);
+            }
+            Ok(())
+        })?;
+        self.credentials.remove(id);
+        Ok(())
+    }
+
+    fn remove_managed(&self, id: Uuid, matches_owner: impl Fn(&Connection) -> bool) -> Result<()> {
+        self.repository.update(|entries| {
+            if let Some(position) = entries
+                .iter()
+                .position(|entry| entry.profile.id == id && matches_owner(&entry.profile))
+            {
                 entries.remove(position);
             }
             Ok(())
@@ -351,7 +387,37 @@ fn ensure_unmanaged(profile: &Connection) -> Result<()> {
             "Manage this connection through IAM personal access.".into(),
         ));
     }
+    if profile.settings.managed_rgw.is_some() {
+        return Err(AppError::Invalid(
+            "Manage this connection through its RGW access key.".into(),
+        ));
+    }
     Ok(())
+}
+
+fn managed_profile(
+    parent: &Connection,
+    id: Uuid,
+    name: String,
+    workspaces: (bool, bool),
+) -> Connection {
+    let mut profile = parent.clone();
+    profile.id = id;
+    profile.endpoint_id = Some(parent.endpoint_id());
+    profile.revision = Some(Uuid::new_v4());
+    profile.name = name;
+    profile.s3_capability = CapabilityState::Unknown;
+    profile.known_buckets.clear();
+    profile.services.clear();
+    profile.settings.default_endpoint = false;
+    (
+        profile.settings.browser_enabled,
+        profile.settings.manager_enabled,
+    ) = workspaces;
+    profile.settings.default_workspace = None;
+    profile.settings.managed_iam = None;
+    profile.settings.managed_rgw = None;
+    profile
 }
 
 fn profile_by_id(entries: &[StoredConnection], id: Uuid) -> Result<&StoredConnection> {
@@ -430,6 +496,7 @@ fn validate_profile(
         .or_else(|| current.map(|profile| profile.settings.clone()))
         .unwrap_or_default();
     settings.managed_iam = None;
+    settings.managed_rgw = None;
     settings.tenant = settings.tenant.trim().into();
     settings.account = settings.account.trim().into();
     settings.realm = settings.realm.trim().into();

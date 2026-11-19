@@ -378,8 +378,9 @@ function showJob(id: string): void {
             <BucketRulesWorkspace v-else-if="managerRoute?.page === 'featureRules' && connections.active"
               :key="`rules:${connections.contextKey}`" :connection="connections.active.id"
               @inspect="go({ workspace: 'manager', page: 'buckets', bucket: $event })" />
-            <AdminWorkspace v-else-if="route.workspace === 'cephAdmin' || managerRoute?.page === 'access'"
-              :key="`access:${route.workspace}:${connections.contextKey}:${route.workspace === 'cephAdmin' ? route.group ?? '' : ''}:${route.workspace === 'cephAdmin' ? route.bucket ?? '' : ''}`" :scope="route.workspace === 'cephAdmin' ? 'ceph' : 's3'"
+            <AdminWorkspace v-else-if="route.workspace === 'cephAdmin' || managerRoute?.page === 'access' || (route.workspace === 'admin' && route.page === 'rgwIdentities')"
+              :key="`access:${route.workspace}:${connections.contextKey}:${route.workspace === 'cephAdmin' ? route.group ?? '' : ''}:${route.workspace === 'cephAdmin' ? route.bucket ?? '' : ''}`"
+              :scope="route.workspace === 'cephAdmin' ? 'ceph' : route.workspace === 'admin' ? 'managedRgw' : 's3'"
               :connection="connections.active" :bucket="route.workspace === 'cephAdmin' ? route.bucket ?? browser.bucket : browser.bucket"
               :initial-group="route.workspace === 'cephAdmin' ? route.group : undefined" :demo="demo" @open="openProfile"
               @notifications="(bucket, arn) => go({ workspace: 'manager', page: 'buckets', bucket, notificationTopic: arn })" />

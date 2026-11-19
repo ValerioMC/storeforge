@@ -17,8 +17,10 @@ import IamPrivateAccess from './IamPrivateAccess.vue'
 import IamRoles from './IamRoles.vue'
 import IamManagedPolicies from './IamManagedPolicies.vue'
 import SnsTopics from './SnsTopics.vue'
+import RgwInventory from './RgwInventory.vue'
+import RgwDelegatedKeys from './RgwDelegatedKeys.vue'
 
-const props = defineProps<{ connection?: Connection; bucket?: string; initialGroup?: CephGroup; demo: boolean; scope: 's3' | 'ceph' }>()
+const props = defineProps<{ connection?: Connection; bucket?: string; initialGroup?: CephGroup; demo: boolean; scope: 's3' | 'ceph' | 'managedRgw' }>()
 const emit = defineEmits<{ open: [profile: Connection]; notifications: [bucket: string, arn: string] }>()
 const group = ref<string>(props.initialGroup ?? 'IAM users')
 const selected = ref('')
@@ -27,18 +29,24 @@ const error = ref('')
 const busy = ref(false)
 const response = ref<string>()
 const confirm = ref(false)
+const showExistingDelete = ref(false)
 let request = 0
 
 const available = computed(() => operations.filter(operation =>
   (props.scope === 'ceph') === (operation.protocol === 'rgw') &&
   (props.demo || identityAvailable(props.connection, operationIdentity(operation)))))
 const groups = computed(() => {
+  const adminOps = !props.demo && identityAvailable(props.connection, 'adminOps')
+  if (props.scope === 'managedRgw') return adminOps ? ['Managed accounts', 'Managed users'] : []
   const names = Array.from(new Set(available.value.map(operation => operation.group)))
-  return props.scope === 's3' && !props.demo && names.length
-    ? names.map(name => name === 'Access keys' ? 'Personal access' : name)
-    : names
+  if (props.scope !== 's3' || props.demo) return names
+  const managerGroups = names.map(name => name === 'Access keys' ? 'Personal access' : name)
+  if (adminOps && names.length) managerGroups.push('Delegated RGW keys')
+  return managerGroups
 })
-const groupOperations = computed(() => available.value.filter(operation => operation.group === group.value))
+const clusterIdentity = computed(() => !props.demo && (group.value === 'Ceph accounts' || group.value === 'Ceph users'))
+const groupOperations = computed(() => available.value.filter(operation =>
+  operation.group === group.value && (!showExistingDelete.value || operation.method === 'DELETE')))
 const actionOptions = computed(() => groupOperations.value.map(({ id, label }) => ({ value: id, label })))
 const operation = computed(() => groupOperations.value.find(item => item.id === selected.value))
 const sampleAvailable = computed(() => props.demo && operation.value?.id === 'ceph-buckets-inspect-bucket-statistics')
@@ -53,6 +61,7 @@ watch(groupOperations, items => {
   selected.value = items[0]?.id ?? ''
 }, { immediate: true })
 watch(selected, reset, { immediate: true })
+watch(group, () => { showExistingDelete.value = false })
 
 function operationIdentity(operation: Operation): IdentityKind {
   if (operation.protocol !== 'rgw') return 's3'
@@ -106,7 +115,10 @@ async function execute(confirmed: boolean): Promise<void> {
 <template>
   <section class="workspace-page">
     <div class="page-header">
-      <div><h1>{{ scope === 'ceph' ? 'Ceph administration' : 'Access & topics' }}</h1><p>{{ scope === 'ceph' ? 'Manage RGW resources with the profile’s verified service identities.' : 'Manage IAM access and notification topics.' }}</p></div>
+      <div>
+        <h1>{{ scope === 'managedRgw' ? 'Managed RGW identities' : scope === 'ceph' ? 'Ceph administration' : 'Access & topics' }}</h1>
+        <p>{{ scope === 'managedRgw' ? 'Register and manage accounts and users on the selected gateway.' : scope === 'ceph' ? 'Manage RGW resources with the profile’s verified service identities.' : 'Manage IAM access, RGW keys and notification topics.' }}</p>
+      </div>
       <span v-if="connection" class="context-chip"><Server :size="16" />{{ connection.name }} · {{ providerNames[connection.provider] }}</span>
     </div>
     <EmptyState v-if="!connection" :icon="ShieldCheck" title="Select a connection" description="Administrative actions use the permissions of the selected connection." />
@@ -123,12 +135,18 @@ async function execute(confirmed: boolean): Promise<void> {
         <div class="admin-body">
           <FadeRegion>
             <div :key="group">
+              <div v-if="clusterIdentity" class="panel-actions">
+                <button type="button" :disabled="busy" @click="showExistingDelete = !showExistingDelete">{{ showExistingDelete ? 'Back to inventory' : 'Delete by ID' }}</button>
+              </div>
               <IamIdentities v-if="!demo && connection && (group === 'IAM users' || group === 'IAM groups')"
                 :connection="connection.id" :kind="group === 'IAM users' ? 'User' : 'Group'" @personal-access="group = 'Personal access'" />
               <IamPrivateAccess v-else-if="!demo && connection && group === 'Personal access'" :profile="connection" @open="emit('open', $event)" />
               <IamRoles v-else-if="!demo && connection && group === 'IAM roles'" :connection="connection.id" :provider="connection.provider" />
               <IamManagedPolicies v-else-if="!demo && connection && group === 'IAM policies'" :connection="connection.id" :provider="connection.provider" />
               <SnsTopics v-else-if="!demo && connection && group === 'Notifications'" :profile="connection" @notifications="(bucket, arn) => emit('notifications', bucket, arn)" />
+              <RgwInventory v-else-if="!showExistingDelete && connection && (clusterIdentity || group === 'Managed accounts' || group === 'Managed users')"
+                :connection="connection.id" :kind="group.endsWith('accounts') ? 'account' : 'user'" :managed="scope === 'managedRgw'" @open="emit('open', $event)" />
+              <RgwDelegatedKeys v-else-if="!demo && connection && group === 'Delegated RGW keys'" :connection="connection.id" @open="emit('open', $event)" />
               <form v-else class="panel-form" @submit.prevent="review">
                 <div class="stage-heading">
                   <div><h2>{{ group }}</h2><p>{{ operation?.protocol === 'rgw' ? 'Manage the selected gateway using its RGW Admin Ops API.' : 'Manage resources within the selected account.' }}</p></div>

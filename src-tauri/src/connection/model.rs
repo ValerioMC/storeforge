@@ -79,6 +79,7 @@ pub struct EndpointSettings {
     pub default_workspace: Option<Workspace>,
     pub coordinates: Option<EndpointCoordinates>,
     pub managed_iam: Option<ManagedIamOwner>,
+    pub managed_rgw: Option<ManagedRgwOwner>,
 }
 
 impl Default for EndpointSettings {
@@ -96,6 +97,7 @@ impl Default for EndpointSettings {
             default_workspace: None,
             coordinates: None,
             managed_iam: None,
+            managed_rgw: None,
         }
     }
 }
@@ -107,6 +109,16 @@ pub struct ManagedIamOwner {
     pub administrator: Uuid,
     pub user_id: String,
     pub user_name: String,
+    pub access_key_id: String,
+}
+
+#[derive(Clone, Deserialize, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ManagedRgwOwner {
+    pub administrator: Uuid,
+    pub tenant: String,
+    pub uid: String,
+    pub account: String,
     pub access_key_id: String,
 }
 

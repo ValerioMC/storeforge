@@ -6,6 +6,7 @@ export function useQueryPage<T>(
   scope: WatchSource<unknown>,
   load: (marker?: string) => Promise<QueryPage<T>>,
   label: (item: T) => string,
+  searchPageLimit = Number.POSITIVE_INFINITY,
 ) {
   const items = shallowRef<T[]>([])
   const markers = ref<string[]>([])
@@ -24,15 +25,17 @@ export function useQueryPage<T>(
       let marker = page.at(-1)
       let result: QueryPage<T>
       let filtered: T[]
+      let scanned = 0
       const visited = new Set(page)
       do {
         result = await load(marker)
+        scanned++
         if (request !== generation) return
         if (result.marker && visited.has(result.marker)) throw new Error('The provider repeated a page marker.')
         if (result.marker) visited.add(result.marker)
         filtered = query ? result.items.filter(item => label(item).toLowerCase().includes(query)) : result.items
         marker = result.marker ?? undefined
-      } while (query && !filtered.length && marker)
+      } while (query && !filtered.length && marker && scanned < searchPageLimit)
       items.value = filtered
       markers.value = page
       nextMarker.value = result.marker

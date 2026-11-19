@@ -13,7 +13,10 @@ use std::sync::Arc;
 
 use tauri::{Manager, WebviewWindowBuilder};
 
-use administration::{controller as administration_commands, service::AdministrationService};
+use administration::{
+    controller as administration_commands, rgw_identities::RgwIdentityService,
+    service::AdministrationService,
+};
 use audit::{controller as audit_commands, service::AuditService};
 use bucket::controller as bucket_commands;
 use connection::{
@@ -43,10 +46,12 @@ pub fn run() {
             app.manage(MonitoringService::open(directory.clone())?);
             app.manage(AuditService::open(directory.clone())?);
             app.manage(administration::private_access::PrivateAccessService::new(
-                directory,
+                directory.clone(),
             ));
+            app.manage(RgwIdentityService::new(directory));
             app.manage(AdministrationService::new()?);
             create_main_window(app)?;
+            start_rgw_expiration_worker(app.handle().clone());
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -86,6 +91,8 @@ pub fn run() {
             administration_commands::administer,
             administration_commands::list_private_iam,
             administration_commands::change_private_iam,
+            administration_commands::read_rgw_identity,
+            administration_commands::change_rgw_identity,
             audit_commands::list_audit,
             monitoring_commands::monitoring_cached,
             monitoring_commands::monitoring_collect,
@@ -100,6 +107,21 @@ pub fn run() {
         tracing::error!(%error, "StoreForge could not start");
         std::process::exit(1);
     }
+}
+
+fn start_rgw_expiration_worker(app: tauri::AppHandle) {
+    tauri::async_runtime::spawn(async move {
+        let mut interval = tokio::time::interval(std::time::Duration::from_secs(60));
+        interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+        loop {
+            interval.tick().await;
+            let service = app.state::<RgwIdentityService>();
+            let connections = app.state::<Arc<ConnectionService>>();
+            if let Err(error) = service.enforce_expirations(&connections).await {
+                tracing::error!(%error, "Could not update RGW expiration records");
+            }
+        }
+    });
 }
 
 fn on_app_event(_app: &tauri::AppHandle, _event: tauri::RunEvent) {
