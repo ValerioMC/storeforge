@@ -43,6 +43,9 @@ pub fn run() {
             );
             app.manage(connections);
             app.manage(transfers);
+            app.manage(transfer::migration::service::MigrationService::open(
+                directory.clone(),
+            )?);
             app.manage(MonitoringService::open(directory.clone())?);
             app.manage(AuditService::open(directory.clone())?);
             app.manage(administration::private_access::PrivateAccessService::new(
@@ -91,6 +94,10 @@ pub fn run() {
             transfer_commands::location_usage,
             transfer_commands::check_integrity,
             transfer_commands::preview_bucket_purge,
+            transfer_commands::list_migrations,
+            transfer_commands::save_migration,
+            transfer_commands::check_migration,
+            transfer_commands::restore_migration_access,
             administration_commands::administer,
             administration_commands::list_private_iam,
             administration_commands::change_private_iam,

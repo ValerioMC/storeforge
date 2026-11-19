@@ -361,3 +361,63 @@ fn parse_credentials(response: Zeroizing<String>) -> Result<Credentials> {
 #[cfg(test)]
 #[path = "../../tests/unit/transfer/sts.rs"]
 mod tests;
+
+pub(crate) fn partition(region: &str) -> &'static str {
+    if region.starts_with("cn-") {
+        "aws-cn"
+    } else if region.starts_with("us-gov-") {
+        "aws-us-gov"
+    } else {
+        "aws"
+    }
+}
+
+pub(crate) async fn caller_principal(session: &Session) -> Result<String> {
+    #[derive(Deserialize)]
+    #[serde(rename_all = "PascalCase")]
+    struct IdentityResponse {
+        get_caller_identity_result: CallerIdentity,
+    }
+
+    #[derive(Deserialize)]
+    #[serde(rename_all = "PascalCase")]
+    struct CallerIdentity {
+        arn: String,
+    }
+
+    let unavailable = || {
+        AppError::Credential(
+            "Could not verify the destination principal for the requested migration protections."
+                .into(),
+        )
+    };
+    let endpoint = sts_endpoint(session, partition(&session.profile.region))?;
+    let request = request(
+        Method::POST,
+        endpoint,
+        Some("application/x-www-form-urlencoded"),
+        b"Action=GetCallerIdentity&Version=2011-06-15".to_vec(),
+    )?;
+    let response = SignedClient::for_connection(&session.profile)?
+        .send(session, "sts", request)
+        .await
+        .map_err(|_| unavailable())?;
+    let identity = quick_xml::de::from_str::<IdentityResponse>(&response)
+        .map_err(|_| unavailable())?
+        .get_caller_identity_result
+        .arn;
+    let mut fields = identity.splitn(6, ':');
+    if fields.next() != Some("arn")
+        || fields.next() != Some(partition(&session.profile.region))
+        || fields.next() != Some("iam")
+        || fields.next() != Some("")
+        || fields.next().is_none()
+        || !fields
+            .next()
+            .is_some_and(|resource| resource == "root" || resource.starts_with("user/"))
+        || identity.contains(['*', '?', ' ', '\n', '\r'])
+    {
+        return Err(unavailable());
+    }
+    Ok(identity)
+}

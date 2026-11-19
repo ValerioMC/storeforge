@@ -18,6 +18,7 @@ import type { Comparison, Transfer, Usage } from '../model/transfer'
 import { useJobs } from '../store/jobs'
 import BucketComparison from './BucketComparison.vue'
 import BucketMaintenance from './BucketMaintenance.vue'
+import MigrationWorkspace from './MigrationWorkspace.vue'
 
 const props = defineProps<{ location: Location; profiles: Connection[]; sourceBuckets: Bucket[]; demo: boolean }>()
 const emit = defineEmits<{ job: [id: string]; source: [bucket: string]; browse: [location: Location] }>()
@@ -25,7 +26,8 @@ const jobs = useJobs()
 const options = [
   { name: 'Compare', icon: ArrowLeftRight },
   { name: 'Prefix compare', icon: ArrowLeftRight },
-  { name: 'Migrate', icon: FolderSync },
+  { name: 'Migrations', icon: FolderSync },
+  { name: 'Prefix copy', icon: FolderSync },
   { name: 'Usage', icon: ChartNoAxesColumn },
   { name: 'Integrity', icon: ListChecks },
   { name: 'Multipart', icon: Database },
@@ -46,7 +48,7 @@ const error = ref('')
 const comparison = ref<Comparison>()
 const usage = ref<Usage>()
 const multipart = ref<MultipartUpload[]>()
-const needsTarget = computed(() => tab.value === 'Prefix compare' || tab.value === 'Migrate')
+const needsTarget = computed(() => tab.value === 'Prefix compare' || tab.value === 'Prefix copy')
 const targetConnections = computed(() => [
   ...(props.demo ? [{ value: 'demo', label: 'Asteria Research (demo)' }] : []),
   ...props.profiles.map(profile => ({ value: profile.id, label: profile.name })),
@@ -92,7 +94,7 @@ async function loadTargetBuckets(): Promise<void> {
 
 function review(): void {
   if (needsTarget.value && !targetBucket.value) return
-  if (tab.value === 'Migrate') confirm.value = true
+  if (tab.value === 'Prefix copy') confirm.value = true
   else void run()
 }
 
@@ -151,7 +153,7 @@ async function abort(): Promise<void> {
   <section class="workspace-page">
     <div class="page-header">
       <div><h1>Storage tools</h1><p>Compare, migrate, and maintain objects under a bucket or prefix.</p></div>
-      <div v-if="tab !== 'Compare' && tab !== 'Integrity' && tab !== 'Purge'" class="tools-source">
+      <div v-if="tab !== 'Compare' && tab !== 'Migrations' && tab !== 'Integrity' && tab !== 'Purge'" class="tools-source">
         <label for="tools-source-bucket">Source bucket</label>
         <AppSelect id="tools-source-bucket" :model-value="location.bucket" :options="sourceBucketOptions" placeholder="Select a bucket" @update:model-value="emit('source', $event)" />
         <code v-if="location.prefix">{{ location.prefix }}</code>
@@ -167,6 +169,7 @@ async function abort(): Promise<void> {
         <FadeRegion>
           <BucketComparison v-if="tab === 'Compare'" :location="location" :profiles="profiles" :source-buckets="sourceBuckets" :demo="demo"
             @browse="emit('browse', $event)" @job="emit('job', $event)" />
+          <MigrationWorkspace v-else-if="tab === 'Migrations'" :connection="location.connection" :profiles="profiles" :buckets="sourceBuckets" :demo="demo" />
           <BucketMaintenance v-else-if="tab === 'Integrity' || tab === 'Purge'" :key="tab" :kind="tab === 'Integrity' ? 'integrity' : 'purge'"
             :location="location" :source-buckets="sourceBuckets" :demo="demo" />
           <EmptyState v-else-if="!location.bucket" :key="tab" :icon="Database" title="Select a source bucket" description="Choose a bucket above to start." />
@@ -175,7 +178,7 @@ async function abort(): Promise<void> {
               <div class="stage-heading">
                 <div><h2>{{ tab }}</h2>
                   <p v-if="tab === 'Prefix compare'">Compare relative keys, sizes, and ETags across two locations.</p>
-                  <p v-else-if="tab === 'Migrate'">Copy all current objects under the source prefix to a destination.</p>
+                  <p v-else-if="tab === 'Prefix copy'">Copy all current objects under the source prefix to a destination.</p>
                   <p v-else-if="tab === 'Usage'">Count objects and bytes with an optional scan of versions and delete markers.</p>
                   <p v-else>Inspect and abort incomplete multipart uploads under this prefix.</p>
                 </div>
@@ -185,12 +188,12 @@ async function abort(): Promise<void> {
                 <label>Destination bucket<AppSelect v-model="targetBucket" :options="targetBucketOptions" placeholder="Choose a bucket" required /></label>
                 <label class="span-two">Destination prefix <small>Optional</small><input v-model="targetPrefix" placeholder="e.g. telemetry/" spellcheck="false" /></label>
               </div>
-              <label v-if="tab === 'Migrate'" class="check-label"><input v-model="overwrite" type="checkbox" /> Overwrite existing destination objects</label>
+              <label v-if="tab === 'Prefix copy'" class="check-label"><input v-model="overwrite" type="checkbox" /> Overwrite existing destination objects</label>
               <label v-if="tab === 'Usage'" class="check-label"><input v-model="includeVersions" type="checkbox" /> Include all versions and delete markers</label>
               <Notice v-if="error || (needsTarget && targetError)" tone="error">{{ error || targetError }}</Notice>
-              <Notice v-if="tab === 'Migrate' && targetBucket && overlap" tone="error">Choose a destination outside the source prefix.</Notice>
-              <div class="panel-actions"><button class="primary" :disabled="demo || busy || (needsTarget && (!targetBucket || sameLocation || (tab === 'Migrate' && overlap)))">
-                {{ busy ? 'Working…' : tab === 'Migrate' ? 'Review migration' : tab === 'Multipart' ? 'List uploads' : `Run ${tab.toLowerCase()} scan` }}
+              <Notice v-if="tab === 'Prefix copy' && targetBucket && overlap" tone="error">Choose a destination outside the source prefix.</Notice>
+              <div class="panel-actions"><button class="primary" :disabled="demo || busy || (needsTarget && (!targetBucket || sameLocation || (tab === 'Prefix copy' && overlap)))">
+                {{ busy ? 'Working…' : tab === 'Prefix copy' ? 'Review prefix copy' : tab === 'Multipart' ? 'List uploads' : `Run ${tab.toLowerCase()} scan` }}
               </button></div>
             </form>
 
@@ -222,9 +225,9 @@ async function abort(): Promise<void> {
           </div>
         </FadeRegion>
       </div>
-    <ConfirmDialog v-if="confirm" title="Start migration?"
+    <ConfirmDialog v-if="confirm" title="Start prefix copy?"
       :description="`Copy current objects to ${target.bucket}/${target.prefix}. ${overwrite ? 'Existing destination keys may be overwritten.' : 'Existing keys are protected.'}`"
-      action="Start migration" @close="confirm = false" @confirm="start" />
+      action="Start prefix copy" @close="confirm = false" @confirm="start" />
     <ConfirmDialog v-if="aborting" title="Abort multipart upload?" :description="`Incomplete parts for ${aborting.key} will be discarded.`" action="Abort upload" danger @close="aborting = undefined" @confirm="abort" />
   </section>
 </template>

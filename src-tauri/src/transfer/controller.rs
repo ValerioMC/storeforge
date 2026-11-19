@@ -153,3 +153,51 @@ pub async fn export_transfer_report(path: std::path::PathBuf, report: String) ->
     temporary.persist(path).map_err(|error| error.error)?;
     Ok(())
 }
+
+use super::migration::{
+    model::{Draft as MigrationDraft, MigrationView, Phase as MigrationPhase},
+    service::MigrationService,
+};
+
+#[tauri::command]
+pub fn list_migrations(
+    migrations: State<'_, MigrationService>,
+    source: Uuid,
+) -> Result<Vec<MigrationView>> {
+    migrations.list(source)
+}
+
+#[tauri::command]
+pub fn save_migration(
+    migrations: State<'_, MigrationService>,
+    connections: State<'_, Arc<ConnectionService>>,
+    draft: MigrationDraft,
+    id: Option<Uuid>,
+    revision: Option<Uuid>,
+) -> Result<MigrationView> {
+    migrations.save(&connections, draft, id, revision)
+}
+
+#[tauri::command]
+pub async fn check_migration(
+    migrations: State<'_, MigrationService>,
+    connections: State<'_, Arc<ConnectionService>>,
+    id: Uuid,
+    revision: Uuid,
+    phase: MigrationPhase,
+    approved: bool,
+) -> Result<MigrationView> {
+    migrations
+        .check(&connections, id, revision, phase, approved)
+        .await
+}
+
+#[tauri::command]
+pub async fn restore_migration_access(
+    migrations: State<'_, MigrationService>,
+    connections: State<'_, Arc<ConnectionService>>,
+    id: Uuid,
+    revision: Uuid,
+) -> Result<MigrationView> {
+    migrations.recover(&connections, id, revision).await
+}
