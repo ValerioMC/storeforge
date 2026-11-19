@@ -53,14 +53,17 @@ pub struct ServicePrincipal {
 #[derive(Clone, Copy, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ServiceRole {
-    UiAdmin,
-    UiSuperadmin,
-    UiUser,
+    #[serde(rename = "ui_admin")]
+    Admin,
+    #[serde(rename = "ui_superadmin")]
+    Superadmin,
+    #[serde(rename = "ui_user")]
+    User,
 }
 
 impl ServiceRole {
     pub fn is_admin(self) -> bool {
-        matches!(self, Self::UiAdmin | Self::UiSuperadmin)
+        matches!(self, Self::Admin | Self::Superadmin)
     }
 }
 

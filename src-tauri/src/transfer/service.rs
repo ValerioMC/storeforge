@@ -272,7 +272,7 @@ impl TransferService {
                 folders,
                 update,
             } => {
-                self.attributes(progress, source, objects, folders, update)
+                self.attributes(progress, source, objects, folders, *update)
                     .await
             }
             Transfer::ApplyVersionPlan {

@@ -90,7 +90,7 @@ fn page<T>(document: ListDocument<T>, marker: Option<&str>) -> Result<(Vec<T>, O
 #[serde(untagged)]
 enum UserListing {
     Key(String),
-    Entry(UserDocument),
+    Entry(Box<UserDocument>),
 }
 
 impl UserListing {
@@ -131,7 +131,7 @@ struct UserDocument {
 #[serde(untagged)]
 enum UserField {
     Name(String),
-    Document(UserDocument),
+    Document(Box<UserDocument>),
 }
 
 impl UserDocument {
@@ -240,7 +240,7 @@ impl UserDocument {
 #[serde(untagged)]
 enum AccountListing {
     Key(String),
-    Entry(AccountDocument),
+    Entry(Box<AccountDocument>),
 }
 
 impl AccountListing {
@@ -465,7 +465,7 @@ impl KeyDocument {
 enum CreatedKeyDocument {
     List(Vec<KeyDocument>),
     Single(KeyDocument),
-    Entries(UserDocument),
+    Entries(Box<UserDocument>),
 }
 
 pub fn issued_key(

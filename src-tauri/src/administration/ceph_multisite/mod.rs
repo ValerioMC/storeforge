@@ -430,4 +430,4 @@ fn validate_journal(scope: &JournalScope) -> Result<()> {
 
 #[cfg(test)]
 #[path = "../../../tests/unit/administration/ceph_multisite.rs"]
-mod ceph_multisite;
+mod ceph_multisite_tests;

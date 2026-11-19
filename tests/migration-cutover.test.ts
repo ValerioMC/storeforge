@@ -65,10 +65,10 @@ function migration(status: MigrationRunStatus, outcome: Partial<MigrationRun['bu
 it('requires cutover confirmation and exposes a failed bucket for retry', async () => {
   desktop.mockImplementation(async (command, args) => {
     if (command === 'list_migrations') return [migration('awaitingCutover')]
-    if (command === 'migration_action' && args?.action === 'cutover') {
+    if (command === 'migration_action' && args && 'action' in args && args.action === 'cutover') {
       return migration('failed', { status: 'failed', error: 'Exact version could not be read.' })
     }
-    if (command === 'migration_action' && args?.action === 'retry') {
+    if (command === 'migration_action' && args && 'action' in args && args.action === 'retry') {
       return migration('verified', { status: 'verified', sourceProtected: true })
     }
     throw new Error(command)
@@ -95,7 +95,7 @@ it('requires cutover confirmation and exposes a failed bucket for retry', async 
 it('confirms exact source deletion, preserves verified copy on failure, and restores access', async () => {
   desktop.mockImplementation(async (command, args) => {
     if (command === 'list_migrations') return [migration('verified', { status: 'verified', sourceProtected: true })]
-    if (command === 'migration_action' && args?.action === 'deleteSources') {
+    if (command === 'migration_action' && args && 'action' in args && args.action === 'deleteSources') {
       return migration('verified', { status: 'verified', sourceProtected: true, cleanupError: 'Fresh destination content differs.' })
     }
     if (command === 'restore_migration_access') return migration('verified', { status: 'verified' })

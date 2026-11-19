@@ -376,7 +376,7 @@ fn service_origin(value: &str) -> Result<Url> {
         Some(Host::Ipv6(ip)) => ip.is_loopback(),
         _ => false,
     };
-    if !matches!(url.scheme(), "https") && !(url.scheme() == "http" && loopback)
+    if !(url.scheme() == "https" || url.scheme() == "http" && loopback)
         || url.host().is_none()
         || !url.username().is_empty()
         || url.password().is_some()

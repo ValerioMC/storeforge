@@ -62,7 +62,7 @@ it('reopens a persisted draft, exposes expired checks, and invalidates the repor
   desktop.mockImplementation(async (command, args) => {
     if (command === 'list_migrations') return [record({ report: report('active', Date.now() - 5000) })]
     if (command === 'save_migration') {
-      return record({ revision: 'rev-2', draft: args?.draft as MigrationDraft })
+      return record({ revision: 'rev-2', draft: (args && 'draft' in args ? args.draft : undefined) as MigrationDraft })
     }
     throw new Error(command)
   })
@@ -91,7 +91,7 @@ it('reopens a persisted draft, exposes expired checks, and invalidates the repor
 it('confirms active checks separately and requires policy recovery after a failed restoration', async () => {
   desktop.mockImplementation(async (command, args) => {
     if (command === 'list_migrations') return [record({ report: report('read', Date.now() + 60_000) })]
-    if (command === 'check_migration' && args?.phase === 'active') return record({
+    if (command === 'check_migration' && args && 'phase' in args && args.phase === 'active') return record({
       recoveryRequired: true, canRestore: true, recoveryError: 'The provider declined the restoration.',
       report: report('active', Date.now() + 60_000, ['Temporary access requires recovery.']),
     })

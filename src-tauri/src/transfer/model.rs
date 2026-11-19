@@ -59,7 +59,7 @@ pub enum Transfer {
         source: Location,
         objects: Vec<ObjectId>,
         folders: Vec<String>,
-        update: BulkAttributes,
+        update: Box<BulkAttributes>,
     },
     ApplyVersionPlan {
         source: Location,

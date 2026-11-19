@@ -96,13 +96,13 @@ it('prices the UTC leap month from measured days and keeps missing values distin
   expect(series.at(-2)).toMatchObject({ month: '2024-01', total: 14 })
   expect(series.at(-1)).toMatchObject({ month: '2024-02', total: 14, partial: true })
   const zero = costRows(report([entry(0, '2024-02-29', 'coast')]), february)
-  expect(zero[0].total).toBe(0)
+  expect(zero[0]?.total).toBe(0)
   expect(topCosts(zero).fraction).toBeNull()
 })
 
 it('sorts and ranks the full result and avoids counting account members twice in portfolio totals', () => {
   const members = Array.from({ length: 23 }, (_, index) => entry(index))
-  members[0].accountId = 'RGW123'
+  members[0]!.accountId = 'RGW123'
   const account: CostMeasurement = {
     ...entry(35), subject: { kind: 'account', id: 'RGW123' }, accountId: 'RGW123', name: '=Ridge account',
   }
@@ -132,7 +132,7 @@ it('preserves the month, endpoint, subject filter, active tab and page after ins
       subjects: 1,
       storageRecords: 1,
       trafficRecords: 0,
-      failures: [{ endpointId: 'ridge', subject: fixture.measurements[0].subject, source: 'traffic', detail: 'No RGW traffic reading.' }],
+      failures: [{ endpointId: 'ridge', subject: fixture.measurements[0]!.subject, source: 'traffic', detail: 'No RGW traffic reading.' }],
     })
     return Promise.resolve([])
   })

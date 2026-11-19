@@ -36,7 +36,11 @@ impl RgwIdentityService {
 
     pub(crate) fn cost_registrations(&self, session: &Session) -> Result<Vec<Registration>> {
         let scope = scope(session);
-        Ok(self.repository.read()?.identities.into_iter()
+        Ok(self
+            .repository
+            .read()?
+            .identities
+            .into_iter()
             .filter(|entry| entry.scope == scope)
             .collect())
     }

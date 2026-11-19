@@ -115,7 +115,7 @@ impl Execution<'_> {
             .report
             .as_ref()
             .and_then(|report| report.pairs.iter().find(|plan| &plan.mapping == mapping));
-        if !report.is_some_and(|plan| plan.settings_copied == check.plan.settings_copied) {
+        if report.is_none_or(|plan| plan.settings_copied != check.plan.settings_copied) {
             return Err(AppError::Invalid(
                 "Source features changed since the reviewed copy plan.".into(),
             ));

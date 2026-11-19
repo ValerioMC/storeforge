@@ -643,7 +643,7 @@ pub async fn protect(
             _ => None,
         });
     let first = receipts.next();
-    let latest = receipts.last().or(first);
+    let latest = receipts.next_back().or(first);
     let earliest = first.map_or_else(|| current.clone(), |(original, _)| original.clone());
     let protection = build_protection(earliest, record.id, session, bucket, access)?;
     if let Some((original, last)) = latest {

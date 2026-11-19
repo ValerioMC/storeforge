@@ -19,7 +19,10 @@ use administration::{
     rgw_identities::RgwIdentityService, service::AdministrationService,
     workspace_settings::controller as settings_commands,
 };
-use audit::{controller as audit_commands, operational_events::controller as operational_commands, service::AuditService};
+use audit::{
+    controller as audit_commands, operational_events::controller as operational_commands,
+    service::AuditService,
+};
 use bucket::controller as bucket_commands;
 use connection::shared_service::{controller as shared_service_commands, service::SharedService};
 use connection::{

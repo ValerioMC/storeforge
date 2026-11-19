@@ -22,11 +22,13 @@ use super::{
     repository::MigrationRepository,
 };
 
+type ActiveMigration = (Uuid, Arc<Signal>);
+
 #[derive(Clone)]
 pub struct MigrationService {
     repository: Arc<MigrationRepository>,
     operations: Arc<Mutex<()>>,
-    control: Arc<ControlLock<Option<(Uuid, Arc<Signal>)>>>,
+    control: Arc<ControlLock<Option<ActiveMigration>>>,
 }
 
 impl MigrationService {

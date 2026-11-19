@@ -173,8 +173,8 @@ fn collection_session(
             message: "Manager is disabled for this connection.".into(),
         });
     }
-    if !matches!(state, CapabilityState::Detected)
-        && !(identity == IdentityKind::S3 && state == CapabilityState::Unknown)
+    if !(matches!(state, CapabilityState::Detected)
+        || identity == IdentityKind::S3 && state == CapabilityState::Unknown)
     {
         let coverage = if state == CapabilityState::Denied {
             Coverage::Denied

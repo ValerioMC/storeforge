@@ -23,7 +23,7 @@ use crate::{
 
 use super::{
     collection::bucket_usage,
-    health::{ProbeOutcome, probe},
+    health::probe,
     model::{CheckMode, Coverage, HealthStatus, Origin, Reading, Scope, Source, UsageSample},
     repository::MonitoringRepository,
     service::MonitoringService,
@@ -232,8 +232,8 @@ fn reopens_a_stale_sample_with_an_explicit_gap_and_a_measured_zero() {
 async fn records_slow_down_and_recovered_using_a_mocked_health_endpoint() {
     let (endpoint, worker) = mock_endpoint(&[
         ("200 OK", ""),
-        ("429 Too Many Requests", ""),
         ("503 Service Unavailable", ""),
+        ("429 Too Many Requests", ""),
         ("200 OK", ""),
     ]);
     let profile = profile(endpoint);
@@ -241,14 +241,7 @@ async fn records_slow_down_and_recovered_using_a_mocked_health_endpoint() {
     let repository = MonitoringRepository::open(directory.path().into()).unwrap();
     let now = clock();
     for offset in 0..4 {
-        let mut outcome = probe(&profile, CheckMode::Http, None).await;
-        if offset == 1 {
-            outcome = ProbeOutcome {
-                state: HealthStatus::Up,
-                latency_ms: Some(1500),
-                ..outcome
-            };
-        }
+        let outcome = probe(&profile, CheckMode::Http, None).await;
         repository
             .health(
                 &profile,
@@ -264,6 +257,7 @@ async fn records_slow_down_and_recovered_using_a_mocked_health_endpoint() {
     assert_eq!(
         view.health
             .iter()
+            .rev()
             .map(|sample| sample.status)
             .collect::<Vec<_>>(),
         [
@@ -273,7 +267,7 @@ async fn records_slow_down_and_recovered_using_a_mocked_health_endpoint() {
             HealthStatus::Up,
         ]
     );
-    assert!(view.health[2].baseline_ms.is_some());
+    assert!(view.health[1].baseline_ms.is_some());
     assert_eq!(view.incidents.len(), 1);
     assert_eq!(view.incidents[0].severity, HealthStatus::Down);
     assert_eq!(view.incidents[0].opened_at, now + TimeDelta::minutes(1));

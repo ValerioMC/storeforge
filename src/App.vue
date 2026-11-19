@@ -479,7 +479,7 @@ function showJob(id: string): void {
 
       <div class="work-area">
         <FadeRegion>
-          <KeepAlive include="BrowserWorkspace,ManagerWorkspace,MonitoringWorkspace,ActivityWorkspace,ToolsWorkspace,BucketWorkbench,StorageCostsWorkspace" :max="12">
+          <KeepAlive v-if="navigation.current" include="BrowserWorkspace,ManagerWorkspace,MonitoringWorkspace,ActivityWorkspace,ToolsWorkspace,BucketWorkbench,StorageCostsWorkspace" :max="12">
             <PortalWorkspace v-if="route.workspace === 'portal'" :location="route"
               @navigate="location => go({ ...location, workspace: 'portal' })" @connections="go({ workspace: 'admin', page: 'connections' })" />
             <BrowserWorkspace v-else-if="route.workspace === 'browser'" key="browser" ref="browserView" :demo="demo" :compact="compact" @add="openEditor()"

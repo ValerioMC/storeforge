@@ -99,11 +99,11 @@ pub(crate) async fn export_logs(
                     .query(&query)
                     .timeout(std::time::Duration::from_secs(600));
                 let response = SharedServiceRepository::send(request).await?;
-                if !response
+                if response
                     .headers()
                     .get(header::CONTENT_TYPE)
                     .and_then(|value| value.to_str().ok())
-                    .is_some_and(|value| value.split(';').next() == Some("text/plain"))
+                    .is_none_or(|value| value.split(';').next() != Some("text/plain"))
                 {
                     return Err(AppError::Storage(
                         "The service did not return provider access logs.".into(),

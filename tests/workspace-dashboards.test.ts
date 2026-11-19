@@ -88,8 +88,8 @@ it('opens a filtered bucket from a measurement, and returns to the keyboard targ
   const source = button('mission-archive')!
   source.focus()
   source.click()
-  await vi.waitFor(() => expect(host.querySelector('.workspace-drawer h2')?.textContent).toBe('mission-archive'))
-  expect(host.querySelectorAll('.manager-workspace tbody tr')).toHaveLength(1)
+  await vi.waitFor(() => expect(host.querySelector('.manager-workspace h1')?.textContent).toBe('mission-archive'))
+  expect(host.querySelector('.workspace-drawer [aria-label="Bucket detail"]')).not.toBeNull()
   window.dispatchEvent(new KeyboardEvent('keydown', { altKey: true, key: 'ArrowLeft' }))
   await vi.waitFor(() => expect(document.activeElement).toBe(source))
   expect(host.textContent).toContain('Buckets by storage')

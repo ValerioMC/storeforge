@@ -90,7 +90,7 @@ function preview(request: PurgeRequest): PurgePreview {
 it('previews mixed purge results, requires the exact eligible phrase, and retries only failed buckets', async () => {
   let started = false
   desktop.mockImplementation(async (command, args) => {
-    if (command === 'preview_bucket_purge') return preview(args?.request as PurgeRequest)
+    if (command === 'preview_bucket_purge') return preview((args && 'request' in args ? args.request : undefined) as PurgeRequest)
     if (command === 'start_transfer') { started = true; return 'operation' }
     if (command === 'list_jobs') return started ? [outcome('purge', results())] : []
     throw new Error(command)

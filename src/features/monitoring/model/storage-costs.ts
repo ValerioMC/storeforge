@@ -1,4 +1,4 @@
-import type { Reading, Traffic } from './monitoring'
+import type { Reading, TrafficPeriod } from './monitoring'
 
 export type CostSubject =
   | { kind: 'account'; id: string }
@@ -25,7 +25,7 @@ export interface CostMeasurement {
   name: string
   accountId: string | null
   storage: Reading<number>
-  traffic: Reading<Traffic>
+  traffic: Reading<TrafficPeriod['totals']>
 }
 
 export interface CostEndpoint { id: string; name: string }
@@ -183,7 +183,7 @@ export function measureSubject(rows: CostMeasurement[], month: string, endpoint:
 
 export function costRows(report: CostReport, filters: CostFilters): CostRow[] {
   const endpoints = new Map(report.endpoints.map(endpoint => [endpoint.id, endpoint.name]))
-  const grouped = new Map<string, CostMeasurement[]>()
+  const grouped = new Map<string, [CostMeasurement, ...CostMeasurement[]]>()
   for (const row of report.measurements) {
     if (!row.day.startsWith(`${filters.month}-`) ||
         filters.endpoint && row.endpointId !== filters.endpoint ||

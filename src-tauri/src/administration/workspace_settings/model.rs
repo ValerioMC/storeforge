@@ -254,28 +254,40 @@ impl ResourceKind {
 #[derive(Deserialize, Serialize, PartialEq, Eq, PartialOrd, Ord)]
 #[serde(rename_all = "snake_case")]
 pub enum ResourcePolicy {
-    AllowActivityHistory,
-    AllowBucketQuotaManagement,
-    AllowAccessKeyManagement,
-    AllowAccessKeyMetadata,
-    AllowAccessKeyExpiration,
-    AllowRgwUsageMetrics,
-    AllowCostEstimation,
-    AllowBucketUsageStats,
-    AllowBucketUsageStatsCollection,
-    AllowMultisiteEndpointSwitching,
-    AllowManagerBrowserDataAccessForAllAdmins,
-    AllowManagedPrivateConnectionProvisioning,
+    #[serde(rename = "allow_activity_history")]
+    ActivityHistory,
+    #[serde(rename = "allow_bucket_quota_management")]
+    BucketQuotaManagement,
+    #[serde(rename = "allow_access_key_management")]
+    AccessKeyManagement,
+    #[serde(rename = "allow_access_key_metadata")]
+    AccessKeyMetadata,
+    #[serde(rename = "allow_access_key_expiration")]
+    AccessKeyExpiration,
+    #[serde(rename = "allow_rgw_usage_metrics")]
+    RgwUsageMetrics,
+    #[serde(rename = "allow_cost_estimation")]
+    CostEstimation,
+    #[serde(rename = "allow_bucket_usage_stats")]
+    BucketUsageStats,
+    #[serde(rename = "allow_bucket_usage_stats_collection")]
+    BucketUsageStatsCollection,
+    #[serde(rename = "allow_multisite_endpoint_switching")]
+    MultisiteEndpointSwitching,
+    #[serde(rename = "allow_manager_browser_data_access_for_all_admins")]
+    ManagerBrowserDataAccessForAllAdmins,
+    #[serde(rename = "allow_managed_private_connection_provisioning")]
+    ManagedPrivateConnectionProvisioning,
 }
 
 impl ResourcePolicy {
     pub fn available(&self, kind: ResourceKind) -> bool {
         match kind {
-            ResourceKind::Connection => matches!(self, Self::AllowActivityHistory),
+            ResourceKind::Connection => matches!(self, Self::ActivityHistory),
             ResourceKind::User => true,
             ResourceKind::Account => !matches!(
                 self,
-                Self::AllowAccessKeyManagement | Self::AllowManagedPrivateConnectionProvisioning
+                Self::AccessKeyManagement | Self::ManagedPrivateConnectionProvisioning
             ),
         }
     }

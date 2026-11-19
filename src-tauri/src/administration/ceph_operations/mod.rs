@@ -454,4 +454,4 @@ pub(crate) async fn check_index_batch(
 
 #[cfg(test)]
 #[path = "../../../tests/unit/administration/ceph_operations.rs"]
-mod ceph_operations;
+mod ceph_operations_tests;

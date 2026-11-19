@@ -82,7 +82,7 @@ async function apply(): Promise<void> {
 <template>
   <Modal :title="fileName(objectKey)" drawer @close="!pending && emit('close')">
     <div class="modal-form">
-      <p class="muted portal-note">{{ objectKey }}</p>
+      <p v-if="objectKey !== fileName(objectKey)" class="muted portal-note">{{ objectKey }}</p>
       <WorkspaceTabs :model-value="view" label="File views" :tabs="tabs" @update:model-value="emit('view', $event)" />
       <Notice v-if="error" tone="error">{{ error }}</Notice>
       <Notice v-if="status" tone="success">{{ status }}</Notice>
