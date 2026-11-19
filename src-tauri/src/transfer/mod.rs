@@ -3,6 +3,7 @@ pub(crate) mod bucket_comparison;
 pub mod controller;
 pub(crate) mod files;
 pub(crate) mod inventory;
+pub(crate) mod maintenance;
 pub mod model;
 pub mod repository;
 pub(crate) mod security;

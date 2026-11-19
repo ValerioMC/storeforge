@@ -90,6 +90,7 @@ pub fn run() {
             transfer_commands::remediate_bucket_difference,
             transfer_commands::location_usage,
             transfer_commands::check_integrity,
+            transfer_commands::preview_bucket_purge,
             administration_commands::administer,
             administration_commands::list_private_iam,
             administration_commands::change_private_iam,

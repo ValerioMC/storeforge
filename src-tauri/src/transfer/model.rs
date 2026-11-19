@@ -6,6 +6,8 @@ use uuid::Uuid;
 
 use crate::object::model::{Location, MetadataUpdate, ObjectId, RetentionMode, Tag};
 
+use super::maintenance::{IntegrityRequest, MaintenanceReport, PurgePreview};
+
 #[derive(Deserialize)]
 #[serde(
     rename_all = "camelCase",
@@ -69,10 +71,12 @@ pub enum Transfer {
         target: Location,
         overwrite: bool,
     },
+    Integrity {
+        request: IntegrityRequest,
+    },
     Purge {
-        source: Location,
-        include_versions: bool,
-        remove_bucket: bool,
+        preview: PurgePreview,
+        confirmation: String,
     },
 }
 
@@ -93,7 +97,8 @@ impl Transfer {
             Self::Attributes { .. } => "Update bulk attributes",
             Self::ApplyVersionPlan { .. } => "Apply version plan",
             Self::Migrate { .. } => "Migrate prefix",
-            Self::Purge { .. } => "Purge objects",
+            Self::Integrity { .. } => "Bucket integrity",
+            Self::Purge { .. } => "Purge buckets",
         }
     }
 }
@@ -190,6 +195,8 @@ pub struct Job {
     pub current_bytes: u64,
     pub current: Option<String>,
     pub cancel_requested: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub maintenance: Option<MaintenanceReport>,
 }
 
 #[derive(Clone, Copy, Serialize, PartialEq, Eq)]
@@ -228,12 +235,4 @@ pub struct Usage {
     pub bytes: u64,
     pub versions: usize,
     pub delete_markers: usize,
-}
-
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct Integrity {
-    pub checked: usize,
-    pub failed: usize,
-    pub failures: Vec<JobFailure>,
 }

@@ -20,6 +20,7 @@ use crate::{
     transfer::{
         files::{self, UploadOptions},
         inventory,
+        maintenance::{self, BucketScope, BucketSelection, IntegrityMethod, IntegrityRequest},
     },
 };
 
@@ -179,8 +180,22 @@ async fn endpoint_object_lifecycle() {
             .unwrap()
             .contains("X-Amz-Signature=")
     );
+    let scope = BucketScope {
+        bucket: bucket.clone(),
+        prefix: location.prefix.clone(),
+    };
+    let integrity = IntegrityRequest {
+        selection: BucketSelection {
+            connection: location.connection,
+            targets: vec![scope.clone()],
+            parallelism: 1,
+        },
+        method: IntegrityMethod::Head,
+        since: None,
+        include_versions: false,
+    };
     assert_eq!(
-        inventory::integrity(&session.s3, &location)
+        maintenance::run_integrity(&session, scope, &integrity, |_| Ok(true))
             .await
             .unwrap()
             .failed,
@@ -214,11 +229,21 @@ async fn endpoint_object_lifecycle() {
         Some(12)
     );
 
-    for version in inventory::all_versions(&session.s3, &location)
+    let mut versions = Vec::new();
+    inventory::visit_versions(&session.s3, &location, |page| versions.extend(page))
         .await
-        .unwrap()
-    {
-        ObjectService::delete(&session.s3, &version).await.unwrap();
+        .unwrap();
+    for version in versions {
+        ObjectService::delete(
+            &session.s3,
+            &ObjectId {
+                bucket: bucket.clone(),
+                key: version.key,
+                version_id: Some(version.version_id),
+            },
+        )
+        .await
+        .unwrap();
     }
     verify_multipart(&session, &location).await;
     BucketService::delete(&session, &bucket).await.unwrap();

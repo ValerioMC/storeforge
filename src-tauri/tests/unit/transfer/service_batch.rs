@@ -91,6 +91,7 @@ async fn browser_batch_partial_move_keeps_an_unverified_source() {
         current_bytes: 0,
         current: None,
         cancel_requested: false,
+        maintenance: None,
     })
     .unwrap();
     let progress = Progress { id, jobs: &jobs };

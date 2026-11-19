@@ -17,7 +17,8 @@ use super::{
         self, BucketComparison, BucketPair, ComparisonRequest, ComparisonScope, Remediation,
     },
     inventory,
-    model::{Comparison, Integrity, Job, Transfer, Usage, VersionPlanItem, VersionRule},
+    maintenance::{self, IntegrityRequest, PurgePreview, PurgeRequest},
+    model::{Comparison, Job, Transfer, Usage, VersionPlanItem, VersionRule},
     security::AccessInput,
     service::TransferService,
 };
@@ -103,11 +104,24 @@ pub async fn location_usage(
 }
 
 #[tauri::command]
-pub async fn check_integrity(
+pub fn check_integrity(
+    transfers: State<'_, TransferService>,
+    request: IntegrityRequest,
+) -> Result<Uuid> {
+    transfers.start(Transfer::Integrity { request }, None)
+}
+
+#[tauri::command]
+pub async fn preview_bucket_purge(
     connections: State<'_, Arc<ConnectionService>>,
-    location: Location,
-) -> Result<Integrity> {
-    inventory::integrity(&connections.session(location.connection)?.s3, &location).await
+    request: PurgeRequest,
+) -> Result<PurgePreview> {
+    let session = connections.session_for(
+        request.selection.connection,
+        Workspace::Manager,
+        IdentityKind::S3,
+    )?;
+    maintenance::preview_purge(&session, request).await
 }
 
 #[tauri::command]

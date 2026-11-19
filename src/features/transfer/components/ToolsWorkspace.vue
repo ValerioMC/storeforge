@@ -14,9 +14,10 @@ import { objectsApi } from '../../browser/api/objects'
 import type { Location, MultipartUpload } from '../../browser/model/objects'
 import type { Connection } from '../../connection/model/connection'
 import { transfersApi } from '../api/transfers'
-import type { Comparison, Integrity, Transfer, Usage } from '../model/transfer'
+import type { Comparison, Transfer, Usage } from '../model/transfer'
 import { useJobs } from '../store/jobs'
 import BucketComparison from './BucketComparison.vue'
+import BucketMaintenance from './BucketMaintenance.vue'
 
 const props = defineProps<{ location: Location; profiles: Connection[]; sourceBuckets: Bucket[]; demo: boolean }>()
 const emit = defineEmits<{ job: [id: string]; source: [bucket: string]; browse: [location: Location] }>()
@@ -37,15 +38,13 @@ const targetPrefix = ref('')
 const targetBuckets = ref<Bucket[]>([])
 const targetError = ref('')
 const includeVersions = ref(false)
-const removeBucket = ref(false)
 const overwrite = ref(false)
-const confirm = ref<'Migrate' | 'Purge'>()
+const confirm = ref(false)
 const aborting = ref<MultipartUpload>()
 const busy = ref(false)
 const error = ref('')
 const comparison = ref<Comparison>()
 const usage = ref<Usage>()
-const integrity = ref<Integrity>()
 const multipart = ref<MultipartUpload[]>()
 const needsTarget = computed(() => tab.value === 'Prefix compare' || tab.value === 'Migrate')
 const targetConnections = computed(() => [
@@ -69,12 +68,11 @@ watch([tab, () => props.location, target], resetResults)
 function resetResults(): void {
   request++
   busy.value = false
-  confirm.value = undefined
+  confirm.value = false
   aborting.value = undefined
   error.value = ''
   comparison.value = undefined
   usage.value = undefined
-  integrity.value = undefined
   multipart.value = undefined
 }
 
@@ -94,7 +92,7 @@ async function loadTargetBuckets(): Promise<void> {
 
 function review(): void {
   if (needsTarget.value && !targetBucket.value) return
-  if (tab.value === 'Migrate' || tab.value === 'Purge') confirm.value = tab.value
+  if (tab.value === 'Migrate') confirm.value = true
   else void run()
 }
 
@@ -110,9 +108,6 @@ async function run(): Promise<void> {
     } else if (tab.value === 'Usage') {
       const result = await transfersApi.usage(location, includeVersions.value)
       if (id === request) usage.value = result
-    } else if (tab.value === 'Integrity') {
-      const result = await transfersApi.integrity(location)
-      if (id === request) integrity.value = result
     } else if (tab.value === 'Multipart') {
       const result = await objectsApi.multipart(location)
       if (id === request) multipart.value = result
@@ -125,12 +120,9 @@ async function run(): Promise<void> {
 }
 
 async function start(): Promise<void> {
-  const action = confirm.value
-  confirm.value = undefined
-  if (!action) return
-  const transfer: Transfer = action === 'Migrate'
-    ? { kind: 'migrate', source: props.location, target: target.value, overwrite: overwrite.value }
-    : { kind: 'purge', source: props.location, includeVersions: includeVersions.value, removeBucket: removeBucket.value }
+  if (!confirm.value) return
+  confirm.value = false
+  const transfer: Transfer = { kind: 'migrate', source: props.location, target: target.value, overwrite: overwrite.value }
   busy.value = true
   error.value = ''
   try {
@@ -159,7 +151,7 @@ async function abort(): Promise<void> {
   <section class="workspace-page">
     <div class="page-header">
       <div><h1>Storage tools</h1><p>Compare, migrate, and maintain objects under a bucket or prefix.</p></div>
-      <div v-if="tab !== 'Compare'" class="tools-source">
+      <div v-if="tab !== 'Compare' && tab !== 'Integrity' && tab !== 'Purge'" class="tools-source">
         <label for="tools-source-bucket">Source bucket</label>
         <AppSelect id="tools-source-bucket" :model-value="location.bucket" :options="sourceBucketOptions" placeholder="Select a bucket" @update:model-value="emit('source', $event)" />
         <code v-if="location.prefix">{{ location.prefix }}</code>
@@ -175,6 +167,8 @@ async function abort(): Promise<void> {
         <FadeRegion>
           <BucketComparison v-if="tab === 'Compare'" :location="location" :profiles="profiles" :source-buckets="sourceBuckets" :demo="demo"
             @browse="emit('browse', $event)" @job="emit('job', $event)" />
+          <BucketMaintenance v-else-if="tab === 'Integrity' || tab === 'Purge'" :key="tab" :kind="tab === 'Integrity' ? 'integrity' : 'purge'"
+            :location="location" :source-buckets="sourceBuckets" :demo="demo" />
           <EmptyState v-else-if="!location.bucket" :key="tab" :icon="Database" title="Select a source bucket" description="Choose a bucket above to start." />
           <div v-else :key="tab">
             <form class="panel-form" @submit.prevent="review">
@@ -183,9 +177,7 @@ async function abort(): Promise<void> {
                   <p v-if="tab === 'Prefix compare'">Compare relative keys, sizes, and ETags across two locations.</p>
                   <p v-else-if="tab === 'Migrate'">Copy all current objects under the source prefix to a destination.</p>
                   <p v-else-if="tab === 'Usage'">Count objects and bytes with an optional scan of versions and delete markers.</p>
-                  <p v-else-if="tab === 'Integrity'">Check each listed key against the metadata currently returned by the endpoint.</p>
-                  <p v-else-if="tab === 'Multipart'">Inspect and abort incomplete multipart uploads under this prefix.</p>
-                  <p v-else>Delete current objects or permanently remove all versions under this prefix.</p>
+                  <p v-else>Inspect and abort incomplete multipart uploads under this prefix.</p>
                 </div>
               </div>
               <div v-if="needsTarget" class="form-grid">
@@ -194,12 +186,11 @@ async function abort(): Promise<void> {
                 <label class="span-two">Destination prefix <small>Optional</small><input v-model="targetPrefix" placeholder="e.g. telemetry/" spellcheck="false" /></label>
               </div>
               <label v-if="tab === 'Migrate'" class="check-label"><input v-model="overwrite" type="checkbox" /> Overwrite existing destination objects</label>
-              <label v-if="tab === 'Usage' || tab === 'Purge'" class="check-label"><input v-model="includeVersions" type="checkbox" /> Include all versions and delete markers</label>
-              <label v-if="tab === 'Purge' && !location.prefix && includeVersions" class="check-label"><input v-model="removeBucket" type="checkbox" /> Delete the bucket after emptying it</label>
+              <label v-if="tab === 'Usage'" class="check-label"><input v-model="includeVersions" type="checkbox" /> Include all versions and delete markers</label>
               <Notice v-if="error || (needsTarget && targetError)" tone="error">{{ error || targetError }}</Notice>
               <Notice v-if="tab === 'Migrate' && targetBucket && overlap" tone="error">Choose a destination outside the source prefix.</Notice>
-              <div class="panel-actions"><button :class="tab === 'Purge' ? 'danger' : 'primary'" :disabled="demo || busy || (needsTarget && (!targetBucket || sameLocation || (tab === 'Migrate' && overlap)))">
-                {{ busy ? 'Working…' : tab === 'Purge' ? 'Review purge' : tab === 'Migrate' ? 'Review migration' : tab === 'Multipart' ? 'List uploads' : `Run ${tab.toLowerCase()} scan` }}
+              <div class="panel-actions"><button class="primary" :disabled="demo || busy || (needsTarget && (!targetBucket || sameLocation || (tab === 'Migrate' && overlap)))">
+                {{ busy ? 'Working…' : tab === 'Migrate' ? 'Review migration' : tab === 'Multipart' ? 'List uploads' : `Run ${tab.toLowerCase()} scan` }}
               </button></div>
             </form>
 
@@ -221,10 +212,6 @@ async function abort(): Promise<void> {
               <div><dt>Current objects</dt><dd>{{ usage.objects }}</dd></div><div><dt>Current size</dt><dd>{{ formatSize(usage.bytes) }}</dd></div>
               <div v-if="includeVersions"><dt>Object versions</dt><dd>{{ usage.versions }}</dd></div><div v-if="includeVersions"><dt>Delete markers</dt><dd>{{ usage.deleteMarkers }}</dd></div>
             </dl>
-            <div v-if="integrity" class="tool-results">
-              <p>{{ integrity.checked }} objects checked · {{ integrity.failed }} failed</p>
-              <ul v-if="integrity.failures.length" class="failure-list"><li v-for="failure in integrity.failures" :key="failure.item"><code>{{ failure.item }}</code><span>{{ failure.message }}</span></li></ul>
-            </div>
             <div v-if="multipart" class="tool-results">
               <p v-if="!multipart.length" class="muted">No incomplete uploads.</p>
               <div v-for="upload in multipart" :key="upload.uploadId" class="settings-row">
@@ -235,9 +222,9 @@ async function abort(): Promise<void> {
           </div>
         </FadeRegion>
       </div>
-    <ConfirmDialog v-if="confirm" :title="confirm === 'Purge' ? 'Purge this location?' : 'Start migration?'"
-      :description="confirm === 'Purge' ? `Delete ${includeVersions ? 'all versions and delete markers' : 'current objects'} in ${location.bucket}/${location.prefix}.` : `Copy current objects to ${target.bucket}/${target.prefix}. ${overwrite ? 'Existing destination keys may be overwritten.' : 'Existing keys are protected.'}`"
-      :action="confirm === 'Purge' ? 'Purge objects' : 'Start migration'" :phrase="confirm === 'Purge' ? location.bucket : undefined" :danger="confirm === 'Purge'" @close="confirm = undefined" @confirm="start" />
+    <ConfirmDialog v-if="confirm" title="Start migration?"
+      :description="`Copy current objects to ${target.bucket}/${target.prefix}. ${overwrite ? 'Existing destination keys may be overwritten.' : 'Existing keys are protected.'}`"
+      action="Start migration" @close="confirm = false" @confirm="start" />
     <ConfirmDialog v-if="aborting" title="Abort multipart upload?" :description="`Incomplete parts for ${aborting.key} will be discarded.`" action="Abort upload" danger @close="aborting = undefined" @confirm="abort" />
   </section>
 </template>

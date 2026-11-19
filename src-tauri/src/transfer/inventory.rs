@@ -4,14 +4,14 @@ use aws_sdk_s3::Client;
 use chrono::{DateTime, Utc};
 
 use crate::{
-    common::error::{AppError, Result, storage_error},
+    common::error::{AppError, Result},
     object::{
-        model::{Location, ObjectId, ObjectQuery, ObjectRow, ObjectVersion},
+        model::{Location, ObjectQuery, ObjectRow, ObjectVersion},
         repository,
     },
 };
 
-use super::model::{Comparison, ComparisonRow, Difference, Integrity, JobFailure, Usage};
+use super::model::{Comparison, ComparisonRow, Difference, Usage};
 
 pub async fn objects(client: &Client, location: &Location) -> Result<Vec<ObjectRow>> {
     let mut rows = Vec::new();
@@ -76,19 +76,6 @@ pub async fn visit_versions(
 
 fn repeated_cursor() -> AppError {
     AppError::Storage("The endpoint repeated a listing cursor.".into())
-}
-
-pub async fn all_versions(client: &Client, location: &Location) -> Result<Vec<ObjectId>> {
-    let mut versions = Vec::new();
-    visit_versions(client, location, |page| {
-        versions.extend(page.into_iter().map(|version| ObjectId {
-            bucket: location.bucket.clone(),
-            key: version.key,
-            version_id: Some(version.version_id),
-        }));
-    })
-    .await?;
-    Ok(versions)
 }
 
 pub async fn usage(client: &Client, location: &Location, include_versions: bool) -> Result<Usage> {
@@ -207,42 +194,6 @@ fn record_difference(
             target_bytes,
         });
     }
-}
-
-pub async fn integrity(client: &Client, location: &Location) -> Result<Integrity> {
-    let rows = objects(client, location).await?;
-    let mut result = Integrity {
-        checked: rows.len(),
-        failed: 0,
-        failures: Vec::new(),
-    };
-    for row in rows {
-        let check = client
-            .head_object()
-            .bucket(&location.bucket)
-            .key(&row.key)
-            .set_if_match(row.etag.clone())
-            .send()
-            .await
-            .map_err(storage_error);
-        let failure = match check {
-            Ok(details) if details.content_length() != row.size => {
-                Some("Listed and reported sizes differ.".into())
-            }
-            Ok(_) => None,
-            Err(error) => Some(error.to_string()),
-        };
-        if let Some(message) = failure {
-            result.failed += 1;
-            if result.failures.len() < 2000 {
-                result.failures.push(JobFailure {
-                    item: row.key,
-                    message,
-                });
-            }
-        }
-    }
-    Ok(result)
 }
 
 #[cfg(test)]

@@ -1,9 +1,10 @@
 import { open, save } from '@tauri-apps/plugin-dialog'
 import { desktop, isTauri } from '../../../common/tauri'
 import type { Location, ObjectVersion } from '../../browser/model/objects'
-import type { Comparison, Integrity, Job, Transfer, Usage } from '../model/transfer'
+import type { Comparison, Job, Transfer, Usage } from '../model/transfer'
 
 import type { BucketComparison, BucketComparisonRequest, BucketPair, ComparisonScope, Remediation } from '../model/bucket-comparison'
+import type { IntegrityRequest, PurgePreview, PurgeRequest } from '../model/maintenance'
 import type { TransferAccess } from '../model/access'
 import type { VersionPlanItem, VersionRule } from '../model/batch'
 
@@ -17,7 +18,8 @@ export const transfersApi = {
   remediate: (scope: ComparisonScope, pair: BucketPair, action: Remediation) =>
     desktop<void>('remediate_bucket_difference', { scope, pair, action }),
   usage: (location: Location, includeVersions: boolean) => desktop<Usage>('location_usage', { location, includeVersions }),
-  integrity: (location: Location) => desktop<Integrity>('check_integrity', { location }),
+  integrity: (request: IntegrityRequest) => desktop<string>('check_integrity', { request }),
+  previewPurge: (request: PurgeRequest) => desktop<PurgePreview>('preview_bucket_purge', { request }),
   history: (location: Location) => desktop<ObjectVersion[]>('prefix_history', { location }),
   versionPlan: (location: Location, rule: VersionRule) => desktop<VersionPlanItem[]>('preview_version_plan', { location, rule }),
   async exportReport(name: string, report: string): Promise<void> {

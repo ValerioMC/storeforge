@@ -1,6 +1,7 @@
 import type { Location, ObjectId, Tag } from '../../browser/model/objects'
 
 import type { BulkAttributes, VersionPlanItem, VersionRule } from './batch'
+import type { MaintenanceReport, PurgePreview } from './maintenance'
 
 export type Transfer =
   | { kind: 'upload'; target: Location; paths: string[]; overwrite: boolean }
@@ -12,7 +13,7 @@ export type Transfer =
   | { kind: 'attributes'; source: Location; objects: ObjectId[]; folders: string[]; update: BulkAttributes }
   | { kind: 'applyVersionPlan'; source: Location; rule: VersionRule; items: VersionPlanItem[] }
   | { kind: 'migrate'; source: Location; target: Location; overwrite: boolean }
-  | { kind: 'purge'; source: Location; includeVersions: boolean; removeBucket: boolean }
+  | { kind: 'purge'; preview: PurgePreview; confirmation: string }
 
 export type JobStatus = 'running' | 'completed' | 'failed' | 'cancelled' | 'interrupted'
 
@@ -33,6 +34,7 @@ export interface Job {
   currentBytes?: number
   current: string | null
   cancelRequested: boolean
+  maintenance?: MaintenanceReport
 }
 
 export interface Comparison {
@@ -49,10 +51,4 @@ export interface Usage {
   bytes: number
   versions: number
   deleteMarkers: number
-}
-
-export interface Integrity {
-  checked: number
-  failed: number
-  failures: Failure[]
 }

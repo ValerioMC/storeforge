@@ -11,7 +11,10 @@ use uuid::Uuid;
 
 use crate::{
     common::error::{AppError, Result},
-    connection::service::{ConnectionService, Session},
+    connection::{
+        model::{IdentityKind, Workspace},
+        service::{ConnectionService, Session},
+    },
     object::{
         model::{Location, ObjectChange, ObjectId, Tag},
         repository as objects,
@@ -23,6 +26,10 @@ use super::{
     batch,
     files::{self, UploadOptions, UploadReceipt},
     inventory,
+    maintenance::{
+        self, BucketResult, BucketStatus, IntegrityRequest, MaintenanceOptions, MaintenanceReport,
+        PurgePreview,
+    },
     model::{BulkAttributes, Job, JobFailure, JobStatus, Transfer, VersionPlanItem, VersionRule},
     repository::JobRepository,
     security::{AccessInput, OperationAccess, UploadAccess, transfer_error, write_client},
@@ -83,6 +90,7 @@ impl TransferService {
             access.unwrap_or_default(),
             matches!(&transfer, Transfer::Upload { .. }),
         )?;
+        let maintenance = self.prepare_maintenance(&transfer)?;
         let id = Uuid::new_v4();
         let label = transfer.label().into();
         self.jobs.insert(Job {
@@ -91,7 +99,9 @@ impl TransferService {
             status: JobStatus::Running,
             started_at: Utc::now(),
             finished_at: None,
-            total: 0,
+            total: maintenance
+                .as_ref()
+                .map_or(0, |report| report.buckets.len()),
             succeeded: 0,
             failed: 0,
             failures: Vec::new(),
@@ -100,6 +110,7 @@ impl TransferService {
             current_bytes: 0,
             current: None,
             cancel_requested: false,
+            maintenance,
         })?;
         let service = self.clone();
         tauri::async_runtime::spawn(async move {
@@ -113,6 +124,43 @@ impl TransferService {
             }
         });
         Ok(id)
+    }
+
+    fn prepare_maintenance(&self, transfer: &Transfer) -> Result<Option<MaintenanceReport>> {
+        let (options, selection) = match transfer {
+            Transfer::Integrity { request } => {
+                request.validate()?;
+                self.maintenance_session(request.selection.connection)?;
+                (MaintenanceOptions::from(request), &request.selection)
+            }
+            Transfer::Purge {
+                preview,
+                confirmation,
+            } => {
+                let session = self.maintenance_session(preview.request.selection.connection)?;
+                preview.validate(&session, confirmation)?;
+                (
+                    MaintenanceOptions::from(&preview.request),
+                    &preview.request.selection,
+                )
+            }
+            _ => return Ok(None),
+        };
+        Ok(Some(MaintenanceReport {
+            connection: selection.connection,
+            options,
+            buckets: selection
+                .targets
+                .iter()
+                .cloned()
+                .map(BucketResult::new)
+                .collect(),
+        }))
+    }
+
+    fn maintenance_session(&self, connection: Uuid) -> Result<Session> {
+        self.connections
+            .session_for(connection, Workspace::Manager, IdentityKind::S3)
     }
 
     async fn run(
@@ -259,14 +307,11 @@ impl TransferService {
                 )
                 .await
             }
+            Transfer::Integrity { request } => self.integrity(progress, request).await,
             Transfer::Purge {
-                source,
-                include_versions,
-                remove_bucket,
-            } => {
-                self.purge(progress, source, include_versions, remove_bucket)
-                    .await
-            }
+                preview,
+                confirmation,
+            } => self.purge(progress, preview, confirmation).await,
         }
     }
 
@@ -489,36 +534,38 @@ impl TransferService {
         Ok(())
     }
 
+    async fn integrity(&self, progress: &Progress<'_>, request: IntegrityRequest) -> Result<()> {
+        let session = self.maintenance_session(request.selection.connection)?;
+        for (index, scope) in request.selection.targets.iter().cloned().enumerate() {
+            if !progress.begin(&scope.label())? {
+                break;
+            }
+            let report = maintenance::run_integrity(&session, scope, &request, |report| {
+                progress.publish_bucket(index, report)
+            })
+            .await?;
+            progress.finish_bucket(index, &report)?;
+        }
+        Ok(())
+    }
+
     async fn purge(
         &self,
         progress: &Progress<'_>,
-        source: Location,
-        include_versions: bool,
-        remove_bucket: bool,
+        preview: PurgePreview,
+        confirmation: String,
     ) -> Result<()> {
-        if remove_bucket && (!source.prefix.is_empty() || !include_versions) {
-            return Err(AppError::Invalid(
-                "Removing a bucket requires its root and all versions.".into(),
-            ));
-        }
-        let client = self.connections.session(source.connection)?.s3;
-        let items = purge_items(&client, &source, include_versions).await?;
-        progress.set_total(items.len() + usize::from(remove_bucket))?;
-        for object in items {
-            if !progress.begin(&object.key)? {
-                return Ok(());
+        let session = self.maintenance_session(preview.request.selection.connection)?;
+        preview.validate(&session, &confirmation)?;
+        for (index, target) in preview.buckets.iter().enumerate() {
+            if !progress.begin(&target.scope.label())? {
+                break;
             }
-            progress.record(&object.key, ObjectService::delete(&client, &object).await)?;
-        }
-        if remove_bucket && progress.can_remove_bucket()? && progress.begin(&source.bucket)? {
-            progress.record(
-                &source.bucket,
-                crate::bucket::service::BucketService::delete(
-                    &self.connections.session(source.connection)?,
-                    &source.bucket,
-                )
-                .await,
-            )?;
+            let report = maintenance::run_purge(&session, target, &preview.request, |report| {
+                progress.publish_bucket(index, report)
+            })
+            .await?;
+            progress.finish_bucket(index, &report)?;
         }
         Ok(())
     }
@@ -560,8 +607,32 @@ impl Progress<'_> {
         self.jobs.update(self.id, |job| job.succeeded > 0)
     }
 
-    fn can_remove_bucket(&self) -> Result<bool> {
-        self.jobs.update(self.id, |job| job.failed == 0)
+    fn publish_bucket(&self, index: usize, report: &BucketResult) -> Result<bool> {
+        self.jobs.update(self.id, |job| {
+            let bucket = job
+                .maintenance
+                .as_mut()
+                .and_then(|maintenance| maintenance.buckets.get_mut(index))
+                .ok_or_else(|| AppError::Missing("The bucket job scope is unavailable.".into()))?;
+            *bucket = report.clone();
+            Ok(!job.cancel_requested)
+        })?
+    }
+
+    fn finish_bucket(&self, index: usize, report: &BucketResult) -> Result<()> {
+        self.publish_bucket(index, report)?;
+        if report.status != BucketStatus::Cancelled {
+            let outcome = if report.failed == 0 {
+                Ok(())
+            } else {
+                Err(AppError::Storage(format!(
+                    "{} bucket operation failure(s).",
+                    report.failed
+                )))
+            };
+            self.record(&report.scope.label(), outcome)?;
+        }
+        self.jobs.checkpoint()
     }
 
     fn finish(&self, result: Result<()>) -> Result<()> {
@@ -691,21 +762,6 @@ async fn archive_item(
     .await?;
     files::archive_add(writer, &name, &mut temporary.reopen()?)?;
     Ok(size)
-}
-
-async fn purge_items(
-    client: &Client,
-    source: &Location,
-    include_versions: bool,
-) -> Result<Vec<ObjectId>> {
-    if include_versions {
-        return inventory::all_versions(client, source).await;
-    }
-    Ok(inventory::objects(client, source)
-        .await?
-        .into_iter()
-        .map(|row| object_id(source, row.key))
-        .collect())
 }
 
 fn object_id(location: &Location, key: String) -> ObjectId {
