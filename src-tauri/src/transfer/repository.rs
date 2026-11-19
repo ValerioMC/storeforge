@@ -23,6 +23,7 @@ impl JobRepository {
                 job.status = JobStatus::Interrupted;
                 job.finished_at = Some(Utc::now());
                 job.current = None;
+                job.current_bytes = 0;
             }
         }
         Ok(Self {

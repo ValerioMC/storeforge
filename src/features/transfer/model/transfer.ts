@@ -1,12 +1,16 @@
 import type { Location, ObjectId, Tag } from '../../browser/model/objects'
 
+import type { BulkAttributes, VersionPlanItem, VersionRule } from './batch'
+
 export type Transfer =
   | { kind: 'upload'; target: Location; paths: string[]; overwrite: boolean }
   | { kind: 'download'; connection: string; objects: ObjectId[]; target: string; directory: boolean }
-  | { kind: 'archive'; connection: string; objects: ObjectId[]; target: string }
+  | { kind: 'archive'; connection: string; objects: ObjectId[]; target: string; bucket?: string; prefix?: string; folders?: string[] }
   | { kind: 'delete'; connection: string; objects: ObjectId[] }
   | { kind: 'tag'; connection: string; objects: ObjectId[]; tags: Tag[] }
-  | { kind: 'copy'; source: Location; objects: ObjectId[]; target: Location; moveSource: boolean; overwrite: boolean }
+  | { kind: 'copy'; source: Location; objects: ObjectId[]; target: Location; moveSource: boolean; overwrite: boolean; folders?: string[]; renameTo?: string }
+  | { kind: 'attributes'; source: Location; objects: ObjectId[]; folders: string[]; update: BulkAttributes }
+  | { kind: 'applyVersionPlan'; source: Location; rule: VersionRule; items: VersionPlanItem[] }
   | { kind: 'migrate'; source: Location; target: Location; overwrite: boolean }
   | { kind: 'purge'; source: Location; includeVersions: boolean; removeBucket: boolean }
 
@@ -24,6 +28,9 @@ export interface Job {
   succeeded: number
   failed: number
   failures: Failure[]
+  successfulItems?: string[]
+  bytesProcessed?: number
+  currentBytes?: number
   current: string | null
   cancelRequested: boolean
 }

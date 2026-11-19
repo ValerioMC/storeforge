@@ -1,4 +1,4 @@
-import { ref } from 'vue'
+import { ref, shallowRef } from 'vue'
 import { errorMessage } from '../../../common/tauri'
 import { transfersApi } from '../../transfer/api/transfers'
 import { useJobs } from '../../transfer/store/jobs'
@@ -8,12 +8,15 @@ import type { Location, ObjectId } from '../model/objects'
 interface Clipboard {
   source: Location
   objects: ObjectId[]
+  folders: string[]
+  revision: string | null
   move: boolean
 }
 
+const clipboard = shallowRef<Clipboard>()
+
 export function useObjectActions(onJob: (id: string) => void) {
   const jobs = useJobs()
-  const clipboard = ref<Clipboard>()
   const failure = ref('')
   const notice = ref('')
 
@@ -30,7 +33,7 @@ export function useObjectActions(onJob: (id: string) => void) {
   async function enqueue(transfer: Transfer): Promise<void> {
     const id = await jobs.start(transfer)
     onJob(id)
-    notice.value = 'Operation started. Follow its progress in Activity.'
+    notice.value = 'Operation started.'
   }
 
   async function upload(target: Location): Promise<void> {
@@ -59,24 +62,25 @@ export function useObjectActions(onJob: (id: string) => void) {
     })
   }
 
-  async function archive(connection: string, objects: ObjectId[]): Promise<void> {
+  async function archive(source: Location, objects: ObjectId[], folders: string[]): Promise<void> {
     await run(async () => {
       const target = await transfersApi.saveFile('objects.zip')
-      if (target) await enqueue({ kind: 'archive', connection, objects, target })
+      if (target) await enqueue({ kind: 'archive', ...source, objects, folders, target })
     })
   }
 
-  function stage(source: Location, objects: ObjectId[], move: boolean): void {
-    clipboard.value = { source, objects, move }
-    notice.value = `${objects.length} ${objects.length === 1 ? 'object' : 'objects'} ready to ${move ? 'move' : 'copy'}. Open the destination and choose Paste.`
+  function stage(source: Location, revision: string | null, objects: ObjectId[], folders: string[], move: boolean): void {
+    clipboard.value = { source: { ...source }, revision, objects: objects.slice(), folders: folders.slice(), move }
+    notice.value = 'Open the destination and choose Paste.'
   }
 
-  async function paste(target: Location): Promise<void> {
+  async function paste(target: Location, sourceRevision: string | null | undefined): Promise<void> {
     const current = clipboard.value
     if (!current) return
     await run(async () => {
-      await enqueue({ kind: 'copy', source: current.source, objects: current.objects, target, moveSource: current.move, overwrite: false })
-      if (current.move) clipboard.value = undefined
+      if (current.revision !== sourceRevision) throw new Error('The source connection has changed. Select the source items again.')
+      await enqueue({ kind: 'copy', source: current.source, objects: current.objects, folders: current.folders, target, moveSource: current.move, overwrite: false })
+      if (current.move && clipboard.value === current) clipboard.value = undefined
     })
   }
 

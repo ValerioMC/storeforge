@@ -157,11 +157,13 @@ impl ObjectService {
             }
             ObjectChange::Delete => Self::delete(client, object).await,
             ObjectChange::SetTags { tags } => set_tags(client, object, tags).await,
-            ObjectChange::SetMetadata { update } => set_metadata(client, object, update).await,
+            ObjectChange::SetMetadata { update } => {
+                Self::update_copy_attributes(client, object, Some(update), None).await
+            }
             ObjectChange::SetAcl { acl } => set_acl(client, object, acl).await,
             ObjectChange::LegalHold { enabled } => set_legal_hold(client, object, enabled).await,
             ObjectChange::Retention { mode, until } => {
-                set_retention(client, object, mode, &until).await
+                Self::set_retention(client, object, mode, &until, false).await
             }
             ObjectChange::RestoreArchive { days, tier } => {
                 restore_archive(client, object, days, tier).await
@@ -400,40 +402,52 @@ async fn set_tags(client: &Client, object: &ObjectId, tags: Vec<Tag>) -> Result<
     Ok(())
 }
 
-async fn set_metadata(client: &Client, object: &ObjectId, update: MetadataUpdate) -> Result<()> {
-    if object.version_id.is_some() {
-        return Err(AppError::Invalid(
-            "Only the current version supports metadata replacement.".into(),
-        ));
+impl ObjectService {
+    pub async fn update_copy_attributes(
+        client: &Client,
+        object: &ObjectId,
+        update: Option<MetadataUpdate>,
+        storage_class: Option<&str>,
+    ) -> Result<()> {
+        if object.version_id.is_some() {
+            return Err(AppError::Invalid(
+                "Only the current version supports metadata or storage class replacement.".into(),
+            ));
+        }
+        let current = repository::head(client, object).await?;
+        let mut copy = client
+            .copy_object()
+            .bucket(&object.bucket)
+            .key(&object.key)
+            .copy_source(repository::copy_source(object))
+            .set_copy_source_if_match(current.e_tag)
+            .set_website_redirect_location(current.website_redirect_location)
+            .set_storage_class(
+                storage_class
+                    .map(aws_sdk_s3::types::StorageClass::from)
+                    .or(current.storage_class),
+            )
+            .set_server_side_encryption(current.server_side_encryption)
+            .set_ssekms_key_id(current.ssekms_key_id);
+        if let Some(update) = update {
+            let expires = update
+                .expires
+                .as_deref()
+                .map(parse_content_expiry)
+                .transpose()?;
+            copy = copy
+                .metadata_directive(MetadataDirective::Replace)
+                .set_metadata(Some(update.metadata))
+                .set_content_type(update.content_type)
+                .set_cache_control(update.cache_control)
+                .set_content_disposition(update.content_disposition)
+                .set_content_encoding(update.content_encoding)
+                .set_content_language(update.content_language)
+                .set_expires(expires);
+        }
+        copy.send().await.map_err(storage_error)?;
+        Ok(())
     }
-    let expires = update
-        .expires
-        .as_deref()
-        .map(parse_content_expiry)
-        .transpose()?;
-    let current = repository::head(client, object).await?;
-    client
-        .copy_object()
-        .bucket(&object.bucket)
-        .key(&object.key)
-        .copy_source(repository::copy_source(object))
-        .set_copy_source_if_match(current.e_tag)
-        .metadata_directive(MetadataDirective::Replace)
-        .set_metadata(Some(update.metadata))
-        .set_content_type(update.content_type)
-        .set_cache_control(update.cache_control)
-        .set_content_disposition(update.content_disposition)
-        .set_content_encoding(update.content_encoding)
-        .set_content_language(update.content_language)
-        .set_expires(expires)
-        .set_website_redirect_location(current.website_redirect_location)
-        .set_storage_class(current.storage_class)
-        .set_server_side_encryption(current.server_side_encryption)
-        .set_ssekms_key_id(current.ssekms_key_id)
-        .send()
-        .await
-        .map_err(storage_error)?;
-    Ok(())
 }
 
 fn parse_content_expiry(value: &str) -> Result<DateTime> {
@@ -475,35 +489,41 @@ async fn set_legal_hold(client: &Client, object: &ObjectId, enabled: bool) -> Re
     Ok(())
 }
 
-async fn set_retention(
-    client: &Client,
-    object: &ObjectId,
-    mode: super::model::RetentionMode,
-    until: &str,
-) -> Result<()> {
-    use super::model::RetentionMode;
-    let mode = match mode {
-        RetentionMode::Governance => ObjectLockRetentionMode::Governance,
-        RetentionMode::Compliance => ObjectLockRetentionMode::Compliance,
-    };
-    let until = DateTime::from_str(until, DateTimeFormat::DateTime).map_err(|_| {
-        AppError::Invalid("Use an ISO 8601 retention timestamp, including the time zone.".into())
-    })?;
-    client
-        .put_object_retention()
-        .bucket(&object.bucket)
-        .key(&object.key)
-        .set_version_id(object.version_id.clone())
-        .retention(
-            ObjectLockRetention::builder()
-                .mode(mode)
-                .retain_until_date(until)
-                .build(),
-        )
-        .send()
-        .await
-        .map_err(storage_error)?;
-    Ok(())
+impl ObjectService {
+    pub async fn set_retention(
+        client: &Client,
+        object: &ObjectId,
+        mode: super::model::RetentionMode,
+        until: &str,
+        bypass_governance: bool,
+    ) -> Result<()> {
+        use super::model::RetentionMode;
+        let mode = match mode {
+            RetentionMode::Governance => ObjectLockRetentionMode::Governance,
+            RetentionMode::Compliance => ObjectLockRetentionMode::Compliance,
+        };
+        let until = DateTime::from_str(until, DateTimeFormat::DateTime).map_err(|_| {
+            AppError::Invalid(
+                "Use an ISO 8601 retention timestamp, including the time zone.".into(),
+            )
+        })?;
+        client
+            .put_object_retention()
+            .bucket(&object.bucket)
+            .key(&object.key)
+            .set_version_id(object.version_id.clone())
+            .set_bypass_governance_retention(bypass_governance.then_some(true))
+            .retention(
+                ObjectLockRetention::builder()
+                    .mode(mode)
+                    .retain_until_date(until)
+                    .build(),
+            )
+            .send()
+            .await
+            .map_err(storage_error)?;
+        Ok(())
+    }
 }
 
 async fn restore_archive(
@@ -541,4 +561,4 @@ async fn restore_archive(
 
 #[cfg(test)]
 #[path = "../../tests/unit/object/service.rs"]
-mod tests;
+pub(crate) mod tests;

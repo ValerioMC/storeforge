@@ -253,21 +253,11 @@ function browserStore(profile: BrowserProfile) {
     }
   }
 
-  function toggleVisible(keys: string[]): void {
-    const all = keys.every(key => selected.value.includes(key))
-    const changed = new Set(selected.value)
-    for (const key of keys) {
-      if (all) changed.delete(key)
-      else changed.add(key)
-    }
-    selected.value = [...changed]
-  }
-
   return {
     buckets, bucket, prefix, rows, selected, selectedObjects, focus, focusedRow, cursor, loading, bucketLoading, error, bucketError,
     location, recursive, filter, technical, tab, advanced, options, sort, detailColumns, columnWidths,
     rowDetails, prefixCount, deletedError, limitReached, recent, favorites, isFavorite, revision, metadataDrafts, tagDrafts,
-    loadBuckets, changeConnection, navigate, loadRows, toggleSelection, toggleVisible,
+    loadBuckets, changeConnection, navigate, loadRows, toggleSelection,
     invalidateRowDetails, loadRowDetails, loadPrefixCount, toggleFavorite,
   }
 }

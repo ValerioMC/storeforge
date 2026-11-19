@@ -37,6 +37,7 @@ export interface ObjectVersion {
   deleteMarker: boolean
   size: number | null
   modified: string | null
+  storageClass?: string | null
 }
 
 export interface VersionPage {
@@ -72,6 +73,10 @@ export interface Tag {
 export interface MetadataUpdate {
   contentType: string | null
   cacheControl: string | null
+  contentDisposition: string | null
+  contentEncoding: string | null
+  contentLanguage: string | null
+  expires: string | null
   metadata: Record<string, string>
 }
 
@@ -86,6 +91,8 @@ export type ObjectChange =
 
 export interface Preview {
   contentType: string
+  kind: 'text' | 'image' | 'audio' | 'video' | 'pdf'
+  oversized: boolean
   data: string
   truncated: boolean
 }

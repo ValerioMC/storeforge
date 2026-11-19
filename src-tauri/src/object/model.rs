@@ -98,11 +98,15 @@ pub struct Tag {
     pub value: String,
 }
 
-#[derive(Deserialize)]
+#[derive(Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct MetadataUpdate {
     pub content_type: Option<String>,
     pub cache_control: Option<String>,
+    pub content_disposition: Option<String>,
+    pub content_encoding: Option<String>,
+    pub content_language: Option<String>,
+    pub expires: Option<String>,
     pub metadata: HashMap<String, String>,
 }
 
@@ -110,11 +114,23 @@ pub struct MetadataUpdate {
 #[serde(rename_all = "camelCase")]
 pub struct Preview {
     pub content_type: String,
+    pub kind: PreviewKind,
     pub data: String,
     pub truncated: bool,
+    pub oversized: bool,
 }
 
-#[derive(Deserialize)]
+#[derive(PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum PreviewKind {
+    Text,
+    Image,
+    Audio,
+    Video,
+    Pdf,
+}
+
+#[derive(Clone, Copy, Deserialize)]
 #[serde(rename_all = "UPPERCASE")]
 pub enum RetentionMode {
     Governance,

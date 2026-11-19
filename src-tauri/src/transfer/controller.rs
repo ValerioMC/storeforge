@@ -4,12 +4,14 @@ use tauri::State;
 use uuid::Uuid;
 
 use crate::{
-    common::error::Result, connection::service::ConnectionService, object::model::Location,
+    common::error::Result,
+    connection::service::ConnectionService,
+    object::model::{Location, ObjectVersion},
 };
 
 use super::{
-    inventory,
-    model::{Comparison, Integrity, Job, Transfer, Usage},
+    batch, inventory,
+    model::{Comparison, Integrity, Job, Transfer, Usage, VersionPlanItem, VersionRule},
     service::TransferService,
 };
 
@@ -59,4 +61,34 @@ pub async fn check_integrity(
     location: Location,
 ) -> Result<Integrity> {
     inventory::integrity(&connections.session(location.connection)?.s3, &location).await
+}
+
+#[tauri::command]
+pub async fn prefix_history(
+    connections: State<'_, Arc<ConnectionService>>,
+    location: Location,
+) -> Result<Vec<ObjectVersion>> {
+    batch::prefix_history(&connections.session(location.connection)?.s3, &location).await
+}
+
+#[tauri::command]
+pub async fn preview_version_plan(
+    connections: State<'_, Arc<ConnectionService>>,
+    location: Location,
+    rule: VersionRule,
+) -> Result<Vec<VersionPlanItem>> {
+    let history =
+        batch::prefix_history(&connections.session(location.connection)?.s3, &location).await?;
+    batch::version_plan(&history, &rule)
+}
+
+#[tauri::command]
+pub async fn export_transfer_report(path: std::path::PathBuf, report: String) -> Result<()> {
+    let parent = path.parent().ok_or_else(|| {
+        crate::common::error::AppError::Invalid("Choose a report destination.".into())
+    })?;
+    let temporary = tempfile::NamedTempFile::new_in(parent)?;
+    tokio::fs::write(temporary.path(), report).await?;
+    temporary.persist(path).map_err(|error| error.error)?;
+    Ok(())
 }

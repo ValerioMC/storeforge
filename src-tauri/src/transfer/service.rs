@@ -11,7 +11,7 @@ use uuid::Uuid;
 
 use crate::{
     common::error::{AppError, Result, storage_error},
-    connection::service::ConnectionService,
+    connection::service::{ConnectionService, Session},
     object::{
         model::{Location, ObjectChange, ObjectId, Tag},
         repository as objects,
@@ -20,9 +20,10 @@ use crate::{
 };
 
 use super::{
+    batch,
     files::{self, UploadOptions, UploadReceipt},
     inventory,
-    model::{Job, JobFailure, JobStatus, Transfer},
+    model::{BulkAttributes, Job, JobFailure, JobStatus, Transfer, VersionPlanItem, VersionRule},
     repository::JobRepository,
 };
 
@@ -37,6 +38,7 @@ struct CopyPlan {
     target: Location,
     objects: Vec<ObjectId>,
     move_source: bool,
+    rename_to: Option<String>,
     overwrite: bool,
 }
 
@@ -77,6 +79,9 @@ impl TransferService {
             succeeded: 0,
             failed: 0,
             failures: Vec::new(),
+            successful_items: Vec::new(),
+            bytes_processed: 0,
+            current_bytes: 0,
             current: None,
             cancel_requested: false,
         })?;
@@ -113,8 +118,28 @@ impl TransferService {
             Transfer::Archive {
                 connection,
                 objects,
+                folders,
+                prefix,
+                bucket,
                 target,
-            } => self.archive(progress, connection, objects, &target).await,
+            } => {
+                let client = self.connections.session(connection)?.s3;
+                let bucket = bucket
+                    .or_else(|| objects.first().map(|object| object.bucket.clone()))
+                    .ok_or_else(|| {
+                        AppError::Invalid("Select objects or folders to archive.".into())
+                    })?;
+                let source = Location {
+                    connection,
+                    bucket,
+                    prefix,
+                };
+                let mut objects =
+                    batch::expand_selection(&client, &source, objects, folders).await?;
+                objects.retain(|object| object.key != source.prefix);
+                self.archive(progress, &client, objects, &source.prefix, &target)
+                    .await
+            }
             Transfer::Delete {
                 connection,
                 objects,
@@ -133,40 +158,78 @@ impl TransferService {
             Transfer::Copy {
                 source,
                 objects,
+                folders,
+                rename_to,
                 target,
                 move_source,
                 overwrite,
             } => {
+                let source_session = self.connections.session(source.connection)?;
+                let target_session = self.connections.session(target.connection)?;
+                let same_endpoint = source_session.profile.endpoint
+                    == target_session.profile.endpoint
+                    && source_session.context.tenant == target_session.context.tenant;
+                validate_copy_selection(
+                    same_endpoint,
+                    &source,
+                    &target,
+                    &objects,
+                    &folders,
+                    rename_to.as_deref(),
+                )?;
+                let objects =
+                    batch::expand_selection(&source_session.s3, &source, objects, folders).await?;
                 self.copy(
                     progress,
+                    &source_session,
+                    &target_session,
                     CopyPlan {
                         source,
                         target,
                         objects,
                         move_source,
+                        rename_to,
                         overwrite,
                     },
                 )
                 .await
             }
+            Transfer::Attributes {
+                source,
+                objects,
+                folders,
+                update,
+            } => {
+                self.attributes(progress, source, objects, folders, update)
+                    .await
+            }
+            Transfer::ApplyVersionPlan {
+                source,
+                rule,
+                items,
+            } => self.apply_version_plan(progress, source, rule, items).await,
             Transfer::Migrate {
                 source,
                 target,
                 overwrite,
             } => {
-                let client = self.connections.session(source.connection)?.s3;
-                let rows = inventory::objects(&client, &source).await?;
+                let source_session = self.connections.session(source.connection)?;
+                let target_session = self.connections.session(target.connection)?;
+                let rows = inventory::objects(&source_session.s3, &source).await?;
                 let objects = rows
                     .into_iter()
                     .map(|row| object_id(&source, row.key))
                     .collect();
                 self.copy(
                     progress,
+                    &source_session,
+                    &target_session,
                     CopyPlan {
                         source,
                         target,
                         objects,
                         move_source: false,
+                        rename_to: None,
                         overwrite,
                     },
                 )
@@ -197,8 +260,8 @@ impl TransferService {
             if !progress.begin(&item)? {
                 break;
             }
-            let result = upload_file(&client, &target, &path, overwrite).await;
-            progress.record(&item, result)?;
+            let result = upload_file(&client, &target, &path, overwrite, progress).await;
+            progress.record_bytes(&item, result)?;
         }
         Ok(())
     }
@@ -222,8 +285,8 @@ impl TransferService {
             if !progress.begin(&object.key)? {
                 break;
             }
-            let result = download_file(&client, &object, target, directory).await;
-            progress.record(&object.key, result)?;
+            let result = download_file(&client, &object, target, directory, progress).await;
+            progress.record_bytes(&object.key, result)?;
         }
         Ok(())
     }
@@ -231,29 +294,21 @@ impl TransferService {
     async fn archive(
         &self,
         progress: &Progress<'_>,
-        connection: Uuid,
+        client: &Client,
         items: Vec<ObjectId>,
+        prefix: &str,
         target: &Path,
     ) -> Result<()> {
-        let client = self.connections.session(connection)?.s3;
-        let mut names = HashSet::new();
+        let mut names = files::ArchiveNames::default();
         let (temporary, mut writer) = files::archive_writer(target)?;
         progress.set_total(items.len())?;
         for object in items {
             if !progress.begin(&object.key)? {
-                return Ok(());
+                break;
             }
-            if !names.insert(object.key.clone()) {
-                progress.record(
-                    &object.key,
-                    Err(AppError::Invalid(
-                        "This ZIP already contains an entry with the same key.".into(),
-                    )),
-                )?;
-                continue;
-            }
-            let result = append_archive(&client, &object, &mut writer).await;
-            progress.record(&object.key, result)?;
+            let result =
+                archive_item(client, &object, prefix, &mut writer, &mut names, progress).await;
+            progress.record_bytes(&object.key, result)?;
         }
         if !progress.has_success()? {
             return Ok(());
@@ -293,16 +348,83 @@ impl TransferService {
         Ok(())
     }
 
-    async fn copy(&self, progress: &Progress<'_>, plan: CopyPlan) -> Result<()> {
-        let source = self.connections.session(plan.source.connection)?;
-        let target = self.connections.session(plan.target.connection)?;
+    async fn copy(
+        &self,
+        progress: &Progress<'_>,
+        source: &Session,
+        target: &Session,
+        plan: CopyPlan,
+    ) -> Result<()> {
+        let mut destinations = HashSet::new();
         progress.set_total(plan.objects.len())?;
         for object in &plan.objects {
             if !progress.begin(&object.key)? {
                 break;
             }
-            let result = copy_item(&source.s3, &target.s3, object, &plan).await;
-            progress.record(&object.key, result)?;
+            let result = match copy_target(object, &plan) {
+                Ok(key) if destinations.insert(key.clone()) => {
+                    copy_item(&source.s3, &target.s3, object, &plan, key, progress).await
+                }
+                Ok(_) => Err(AppError::Invalid(
+                    "Multiple selections map to this destination key.".into(),
+                )),
+                Err(error) => Err(error),
+            };
+            progress.record_bytes(&object.key, result)?;
+        }
+        Ok(())
+    }
+
+    async fn attributes(
+        &self,
+        progress: &Progress<'_>,
+        source: Location,
+        objects: Vec<ObjectId>,
+        folders: Vec<String>,
+        update: BulkAttributes,
+    ) -> Result<()> {
+        let client = self.connections.session(source.connection)?.s3;
+        let objects = batch::expand_selection(&client, &source, objects, folders).await?;
+        progress.set_total(objects.len())?;
+        for object in objects {
+            if !progress.begin(&object.key)? {
+                break;
+            }
+            progress.record(
+                &object.key,
+                apply_attributes(&client, &object, &update).await,
+            )?;
+        }
+        Ok(())
+    }
+
+    async fn apply_version_plan(
+        &self,
+        progress: &Progress<'_>,
+        source: Location,
+        rule: VersionRule,
+        items: Vec<VersionPlanItem>,
+    ) -> Result<()> {
+        if items
+            .iter()
+            .any(|item| !item.key.starts_with(&source.prefix))
+        {
+            return Err(AppError::Invalid(
+                "The reviewed plan contains a key outside its prefix.".into(),
+            ));
+        }
+        let client = self.connections.session(source.connection)?.s3;
+        let mut seen = HashSet::new();
+        let items: Vec<_> = items.iter().filter(|item| seen.insert(*item)).collect();
+        progress.set_total(items.len())?;
+        for item in items {
+            if !progress.begin(&item.key)? {
+                break;
+            }
+            progress.record(
+                &item.key,
+                batch::apply_version(&client, &source, &rule, item).await,
+            )?;
         }
         Ok(())
     }
@@ -350,6 +472,7 @@ impl Progress<'_> {
     fn begin(&self, item: &str) -> Result<bool> {
         self.jobs.update(self.id, |job| {
             job.current = Some(item.into());
+            job.current_bytes = 0;
             !job.cancel_requested
         })
     }
@@ -357,6 +480,20 @@ impl Progress<'_> {
     fn record(&self, item: &str, result: Result<()>) -> Result<()> {
         self.jobs
             .update(self.id, |job| update_progress(job, item, result))
+    }
+
+    fn update_bytes(&self, bytes: u64) -> Result<()> {
+        self.jobs.update(self.id, |job| job.current_bytes = bytes)
+    }
+
+    fn record_bytes(&self, item: &str, result: Result<u64>) -> Result<()> {
+        self.jobs.update(self.id, |job| {
+            let completed = result.map(|bytes| {
+                job.bytes_processed = job.bytes_processed.saturating_add(bytes);
+            });
+            job.current_bytes = 0;
+            update_progress(job, item, completed);
+        })
     }
 
     fn has_success(&self) -> Result<bool> {
@@ -371,8 +508,11 @@ impl Progress<'_> {
         self.jobs.update(self.id, |job| {
             if let Err(error) = result {
                 update_progress(job, "Operation", Err(error));
+                job.total = job.total.max(job.succeeded + job.failed);
             }
-            job.status = if job.cancel_requested && job.succeeded + job.failed < job.total {
+            job.status = if job.cancel_requested
+                && (job.total == 0 || job.succeeded + job.failed < job.total)
+            {
                 JobStatus::Cancelled
             } else if job.failed > 0 {
                 JobStatus::Failed
@@ -381,6 +521,7 @@ impl Progress<'_> {
             };
             job.finished_at = Some(Utc::now());
             job.current = None;
+            job.current_bytes = 0;
         })?;
         self.jobs.checkpoint()
     }
@@ -388,15 +529,16 @@ impl Progress<'_> {
 
 fn update_progress(job: &mut Job, item: &str, result: Result<()>) {
     match result {
-        Ok(()) => job.succeeded += 1,
+        Ok(()) => {
+            job.succeeded += 1;
+            job.successful_items.push(item.into());
+        }
         Err(error) => {
             job.failed += 1;
-            if job.failures.len() < 200 {
-                job.failures.push(JobFailure {
-                    item: item.into(),
-                    message: error.to_string(),
-                });
-            }
+            job.failures.push(JobFailure {
+                item: item.into(),
+                message: error.to_string(),
+            });
         }
     }
 }
@@ -406,12 +548,14 @@ async fn upload_file(
     target: &Location,
     path: &Path,
     overwrite: bool,
-) -> Result<()> {
+    progress: &Progress<'_>,
+) -> Result<u64> {
+    let bytes = tokio::fs::metadata(path).await?.len();
     let key = format!("{}{}", target.prefix, files::path_name(path)?);
     let content_type = mime_guess::from_path(path)
         .first_or_octet_stream()
         .to_string();
-    files::upload(
+    files::upload_observed(
         client,
         &target.bucket,
         &key,
@@ -421,9 +565,10 @@ async fn upload_file(
             overwrite,
             ..UploadOptions::default()
         },
+        &|bytes| progress.update_bytes(bytes),
     )
     .await?;
-    Ok(())
+    Ok(bytes)
 }
 
 async fn download_file(
@@ -431,19 +576,44 @@ async fn download_file(
     object: &ObjectId,
     target: &Path,
     directory: bool,
-) -> Result<()> {
+    progress: &Progress<'_>,
+) -> Result<u64> {
     let path = files::download_target(target, directory, object)?;
-    files::download(client, object, &path, !directory).await
+    files::download(client, object, &path, !directory, &|bytes| {
+        progress.update_bytes(bytes)
+    })
+    .await
 }
 
-async fn append_archive(
+async fn archive_item(
     client: &Client,
     object: &ObjectId,
+    prefix: &str,
     writer: &mut zip::ZipWriter<std::fs::File>,
-) -> Result<()> {
+    names: &mut files::ArchiveNames,
+    progress: &Progress<'_>,
+) -> Result<u64> {
+    let relative = object
+        .key
+        .strip_prefix(prefix)
+        .ok_or_else(|| AppError::Invalid("This key is outside the archive prefix.".into()))?;
+    if relative.ends_with('/') {
+        if objects::head(client, object).await?.content_length() != Some(0) {
+            return Err(AppError::Invalid(
+                "A nonempty object ending with a slash cannot be archived as a directory.".into(),
+            ));
+        }
+        files::archive_add_directory(writer, &names.reserve(relative)?)?;
+        return Ok(0);
+    }
+    let name = names.reserve(relative)?;
     let mut temporary = NamedTempFile::new()?;
-    files::stream_to_file(client, object, &mut temporary, None).await?;
-    files::archive_add(writer, &object.key, &mut temporary.reopen()?)
+    let size = files::stream_to_file(client, object, &mut temporary, None, &|bytes| {
+        progress.update_bytes(bytes)
+    })
+    .await?;
+    files::archive_add(writer, &name, &mut temporary.reopen()?)?;
+    Ok(size)
 }
 
 async fn purge_items(
@@ -469,6 +639,84 @@ fn object_id(location: &Location, key: String) -> ObjectId {
     }
 }
 
+async fn apply_attributes(
+    client: &Client,
+    object: &ObjectId,
+    update: &BulkAttributes,
+) -> Result<()> {
+    let mut failures = Vec::new();
+    if update.metadata.is_some() || update.storage_class.is_some() {
+        ObjectService::update_copy_attributes(
+            client,
+            object,
+            update.metadata.clone(),
+            update.storage_class.as_deref(),
+        )
+        .await?;
+    }
+    let mut changes = Vec::new();
+    if let Some(tags) = &update.tags {
+        changes.push(("Tags", ObjectChange::SetTags { tags: tags.clone() }));
+    }
+    if let Some(acl) = &update.acl {
+        changes.push(("ACL", ObjectChange::SetAcl { acl: acl.clone() }));
+    }
+    if let Some(enabled) = update.legal_hold {
+        changes.push(("Legal hold", ObjectChange::LegalHold { enabled }));
+    }
+    for (label, change) in changes {
+        if let Err(error) = ObjectService::change(client, object, change).await {
+            failures.push(format!("{label}: {error}"));
+        }
+    }
+    if let Some(retention) = &update.retention
+        && let Err(error) = ObjectService::set_retention(
+            client,
+            object,
+            retention.mode,
+            &retention.until,
+            retention.bypass_governance,
+        )
+        .await
+    {
+        failures.push(format!("Retention: {error}"));
+    }
+    if failures.is_empty() {
+        Ok(())
+    } else {
+        Err(AppError::Storage(failures.join(" · ")))
+    }
+}
+
+fn validate_copy_selection(
+    same_endpoint: bool,
+    source: &Location,
+    target: &Location,
+    objects: &[ObjectId],
+    folders: &[String],
+    rename_to: Option<&str>,
+) -> Result<()> {
+    if rename_to
+        .is_some_and(|name| name.is_empty() || name.contains('/') || matches!(name, "." | ".."))
+        || (rename_to.is_some() && (!folders.is_empty() || objects.len() != 1))
+    {
+        return Err(AppError::Invalid(
+            "Rename requires one object and a single destination name.".into(),
+        ));
+    }
+    if same_endpoint
+        && source.bucket == target.bucket
+        && folders
+            .iter()
+            .any(|folder| target.prefix.starts_with(folder))
+    {
+        return Err(AppError::Invalid(
+            "Choose a destination outside the selected folders.".into(),
+        ));
+    }
+    Ok(())
+}
+
 fn copy_target(object: &ObjectId, plan: &CopyPlan) -> Result<String> {
     if object.bucket != plan.source.bucket {
         return Err(AppError::Invalid(
@@ -481,7 +729,11 @@ fn copy_target(object: &ObjectId, plan: &CopyPlan) -> Result<String> {
         .ok_or_else(|| {
             AppError::Invalid("The selected file is outside the source prefix.".into())
         })?;
-    let key = format!("{}{relative}", plan.target.prefix);
+    let key = format!(
+        "{}{}",
+        plan.target.prefix,
+        plan.rename_to.as_deref().unwrap_or(relative)
+    );
     if key.is_empty()
         || (plan.source.connection == plan.target.connection
             && object.bucket == plan.target.bucket
@@ -499,38 +751,44 @@ async fn copy_item(
     target: &Client,
     object: &ObjectId,
     plan: &CopyPlan,
-) -> Result<()> {
-    let key = copy_target(object, plan)?;
+    key: String,
+    progress: &Progress<'_>,
+) -> Result<u64> {
     let source_info = objects::head(source, object).await?;
-    let length = source_info.content_length().unwrap_or_default();
+    let length = source_info
+        .content_length()
+        .filter(|length| *length >= 0)
+        .ok_or_else(|| AppError::Storage("The endpoint did not report the source size.".into()))?;
     let etag = source_info.e_tag.clone();
+    if plan.move_source {
+        objects::required_id(etag.as_deref(), "source ETag")?;
+    }
     let receipt = if plan.overwrite
         && plan.source.connection == plan.target.connection
         && length <= 5 * 1024 * 1024 * 1024
     {
         copy_inside_endpoint(target, object, &plan.target.bucket, &key, etag.clone()).await?
     } else {
-        copy_via_disk(
-            source,
-            target,
-            object,
-            &plan.target,
-            &key,
-            source_info,
-            plan.overwrite,
-        )
-        .await?
+        copy_via_disk(source, target, object, &key, source_info, plan, progress).await?
     };
     let destination = ObjectId {
         bucket: plan.target.bucket.clone(),
         key,
         version_id: receipt.version_id,
     };
-    verify_destination(target, &destination, length, receipt.etag.as_deref()).await?;
+    let destination_etag = if plan.move_source {
+        Some(objects::required_id(
+            receipt.etag.as_deref(),
+            "destination ETag",
+        )?)
+    } else {
+        receipt.etag
+    };
+    verify_destination(target, &destination, length, destination_etag.as_deref()).await?;
     if plan.move_source {
         delete_moved_source(source, object, etag).await?;
     }
-    Ok(())
+    Ok(length as u64)
 }
 
 async fn copy_inside_endpoint(
@@ -559,13 +817,16 @@ async fn copy_via_disk(
     source: &Client,
     target: &Client,
     object: &ObjectId,
-    destination: &Location,
     key: &str,
     source_info: aws_sdk_s3::operation::head_object::HeadObjectOutput,
-    overwrite: bool,
+    plan: &CopyPlan,
+    progress: &Progress<'_>,
 ) -> Result<UploadReceipt> {
     let mut file = NamedTempFile::new()?;
-    let size = files::stream_to_file(source, object, &mut file, source_info.e_tag).await?;
+    let size = files::stream_to_file(source, object, &mut file, source_info.e_tag, &|bytes| {
+        progress.update_bytes(bytes)
+    })
+    .await?;
     if Some(size as i64) != source_info.content_length {
         return Err(AppError::Storage(
             "Downloaded size did not match the source.".into(),
@@ -576,12 +837,12 @@ async fn copy_via_disk(
         .unwrap_or_else(|| "application/octet-stream".into());
     files::upload(
         target,
-        &destination.bucket,
+        &plan.target.bucket,
         key,
         file.path(),
         UploadOptions {
             content_type,
-            overwrite,
+            overwrite: plan.overwrite,
             metadata: source_info.metadata,
             cache_control: source_info.cache_control,
             content_disposition: source_info.content_disposition,
@@ -636,3 +897,7 @@ async fn delete_moved_source(
         .map_err(storage_error)?;
     Ok(())
 }
+
+#[cfg(test)]
+#[path = "../../tests/unit/transfer/service_batch.rs"]
+mod tests;

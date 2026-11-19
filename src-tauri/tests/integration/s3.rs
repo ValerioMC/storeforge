@@ -158,7 +158,7 @@ async fn endpoint_object_lifecycle() {
         ObjectService::tags(&session.s3, &object).await.unwrap()[0].value,
         "test"
     );
-    files::download(&session.s3, &object, &target, false)
+    files::download(&session.s3, &object, &target, false, &|_| Ok(()))
         .await
         .unwrap();
     assert_eq!(fs::read(target).unwrap(), b"test payload");

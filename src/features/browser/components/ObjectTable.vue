@@ -7,13 +7,16 @@ import { displayName, type ObjectRow } from '../model/objects'
 import type { BrowserStore } from '../store/browser'
 
 const props = defineProps<{ rows: ObjectRow[]; browser: BrowserStore; compact: boolean }>()
+const selectedFolders = defineModel<string[]>('selectedFolders', { default: () => [] })
 const emit = defineEmits<{ open: [row: ObjectRow]; menu: [row: ObjectRow, event: MouseEvent]; next: []; sort: [column: SortColumn] }>()
 const browser = computed(() => props.browser)
 const visible = ref(new Set<string>())
 const elements = new Map<HTMLElement, ObjectRow>()
 let observer: IntersectionObserver | undefined
 const selectable = computed(() => props.rows.filter(row => !row.folder && !row.deleteMarker).map(row => row.key))
-const allSelected = computed(() => selectable.value.length > 0 && selectable.value.every(key => browser.value.selected.includes(key)))
+const folders = computed(() => props.rows.filter(row => row.folder).map(row => row.key))
+const allSelected = computed(() => selectable.value.length + folders.value.length > 0 &&
+  selectable.value.every(key => browser.value.selected.includes(key)) && folders.value.every(key => selectedFolders.value.includes(key)))
 const lazy = computed(() => browser.value.detailColumns.some(column => column === 'versionId' || column === 'contentType'))
 const running = ref(0)
 const fixedWidths: Record<ResizableColumn, number> = {
@@ -49,6 +52,37 @@ onMounted(() => {
 onBeforeUnmount(() => observer?.disconnect())
 
 defineExpose({ focusRow })
+
+function toggleAll(): void {
+  const remove = allSelected.value
+  const objects = new Set(browser.value.selected)
+  const selected = new Set(selectedFolders.value)
+  for (const key of selectable.value) {
+    if (remove) objects.delete(key)
+    else objects.add(key)
+  }
+  for (const key of folders.value) {
+    if (remove) selected.delete(key)
+    else selected.add(key)
+  }
+  browser.value.selected = [...objects]
+  selectedFolders.value = [...selected]
+}
+
+function toggleFolder(key: string): void {
+  selectedFolders.value = selectedFolders.value.includes(key)
+    ? selectedFolders.value.filter(value => value !== key)
+    : [...selectedFolders.value, key]
+}
+
+function checked(row: ObjectRow): boolean {
+  return row.folder ? selectedFolders.value.includes(row.key) : !row.deleteMarker && browser.value.selected.includes(row.key)
+}
+
+function toggleRow(row: ObjectRow, event: MouseEvent): void {
+  if (row.folder) toggleFolder(row.key)
+  else browser.value.toggleSelection(row.key, selectable.value, event.shiftKey)
+}
 
 function observeRow(row: ObjectRow, element: Element | ComponentPublicInstance | null): void {
   if (!(element instanceof HTMLElement)) {
@@ -166,7 +200,7 @@ function cell(row: ObjectRow, column: ResizableColumn): string {
     <table class="object-table" :style="{ minWidth: minWidth + 'px' }">
       <thead>
         <tr>
-          <th class="checkbox-col"><input type="checkbox" aria-label="Select all displayed objects" :checked="allSelected" :disabled="!selectable.length" @change="browser.toggleVisible(selectable)" /></th>
+          <th class="checkbox-col"><input type="checkbox" aria-label="Select all displayed objects" :checked="allSelected" :disabled="!selectable.length && !folders.length" @change="toggleAll" /></th>
           <th v-for="column in columns" :key="column" :style="widthStyle(column)" :aria-sort="sortState(column)">
             <button v-if="sortable(column)" class="table-sort" @click="emit('sort', column)">{{ labels[column] }}
               <component :is="browser.sort.ascending ? ArrowUp : ArrowDown" v-if="browser.sort.column === column" :size="13" />
@@ -181,10 +215,10 @@ function cell(row: ObjectRow, column: ResizableColumn): string {
       <tbody>
         <tr v-for="row in rows" :key="JSON.stringify([row.folder, row.key, row.deleteMarker])"
           :ref="element => observeRow(row, element)"
-          :class="{ focused: browser.focusedRow === row.key, opened: browser.focus?.key === row.key && !row.folder, checked: browser.selected.includes(row.key) }"
+          :class="{ focused: browser.focusedRow === row.key, opened: browser.focus?.key === row.key && !row.folder, checked: checked(row) }"
           @focusin="browser.focusedRow = row.key" @click="emit('open', row)" @contextmenu.prevent.stop="emit('menu', row, $event)">
-          <td><input v-if="!row.folder && !row.deleteMarker" type="checkbox" :aria-label="`Select ${row.key}`" :checked="browser.selected.includes(row.key)"
-            @click.stop="browser.toggleSelection(row.key, selectable, $event.shiftKey)" /></td>
+          <td><input v-if="!row.deleteMarker" type="checkbox" :aria-label="`Select ${row.key}`" :checked="checked(row)"
+            @click.stop="toggleRow(row, $event)" /></td>
           <td>
             <button class="object-name" :aria-current="browser.focus?.key === row.key && !row.folder ? 'true' : undefined" :title="row.key" @click.stop="emit('open', row)">
               <span class="file-icon" :class="{ 'folder-icon': row.folder }"><component :is="fileIcon(row)" :size="16" /></span>

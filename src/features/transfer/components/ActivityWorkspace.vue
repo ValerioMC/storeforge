@@ -1,13 +1,13 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
-import { Activity, ArrowDownToLine, ArrowUpFromLine, CircleStop, ClipboardList, MoveRight } from 'lucide-vue-next'
+import { Activity, ArrowDownToLine, ArrowUpFromLine, ClipboardList, MoveRight } from 'lucide-vue-next'
 import { formatDate } from '../../../common/format'
 import AuditHistory from '../../audit/components/AuditHistory.vue'
-import { errorMessage } from '../../../common/tauri'
 import EmptyState from '../../../components/ui/EmptyState.vue'
 import FadeRegion from '../../../components/ui/FadeRegion.vue'
 import Notice from '../../../components/ui/Notice.vue'
 import type { Job, JobStatus } from '../model/transfer'
+import TransferJobDetail from './TransferJobDetail.vue'
 import { useJobs } from '../store/jobs'
 
 const props = defineProps<{ demo: boolean; preselected: string | null; audit?: boolean }>()
@@ -16,7 +16,6 @@ const store = useJobs()
 const view = ref<'Jobs' | 'Audit'>('Jobs')
 watch(() => props.audit, audit => { view.value = audit ? 'Audit' : 'Jobs' }, { immediate: true })
 const filter = ref<'all' | JobStatus>('all')
-const localError = ref('')
 
 const demoJobs: Job[] = [
   { id: 'demo-1', label: 'Upload', status: 'completed', startedAt: '2026-11-18T09:24:00Z', finishedAt: '2026-11-18T09:25:00Z', total: 12, succeeded: 12, failed: 0, failures: [], current: null, cancelRequested: false },
@@ -43,14 +42,6 @@ function jobIcon(label: string) {
   return ClipboardList
 }
 
-async function cancel(id: string): Promise<void> {
-  try {
-    await store.cancel(id)
-    localError.value = ''
-  } catch (failure) {
-    localError.value = errorMessage(failure)
-  }
-}
 </script>
 
 <template>
@@ -65,7 +56,7 @@ async function cancel(id: string): Promise<void> {
         <nav class="workspace-tabs activity-filters" aria-label="Filter activity">
           <button v-for="group in groups" :key="group.id" :class="{ active: group.id === filter }" :aria-pressed="group.id === filter" @click="filter = group.id">{{ group.label }} <span class="tab-count">{{ group.count }}</span></button>
         </nav>
-        <Notice v-if="localError || store.error" tone="error">{{ localError || store.error }}</Notice>
+        <Notice v-if="store.error" tone="error">{{ store.error }}</Notice>
         <EmptyState v-if="!visible.length" :icon="Activity" :title="filter === 'all' ? 'No transfer activity' : 'No matching operations'" description="Uploads, downloads, migrations, and bulk changes appear here.">
           <button @click="emit('browse')">Open object browser</button>
         </EmptyState>
@@ -77,15 +68,7 @@ async function cancel(id: string): Promise<void> {
               <span class="job-count">{{ Math.min(job.total, job.succeeded + job.failed) }} / {{ job.total }} processed</span>
               <span class="chip" :class="`job-${job.status}`">{{ statusLabel(job.status) }}</span>
             </summary>
-            <div class="job-detail">
-              <progress v-if="job.total > 0" :class="{ failed: job.failed > 0 }" :max="job.total" :value="Math.min(job.total, job.succeeded + job.failed)" :aria-label="`${job.label} progress`" />
-              <progress v-else-if="job.status === 'running'" aria-label="Scanning objects" />
-              <div class="inline between"><p>{{ job.succeeded }} succeeded · {{ job.failed }} failed<span v-if="job.finishedAt"> · Finished {{ formatDate(job.finishedAt, true) }}</span></p>
-                <button v-if="job.status === 'running'" :disabled="job.cancelRequested" @click="cancel(job.id)"><CircleStop :size="16" />{{ job.cancelRequested ? 'Stopping…' : 'Stop after current item' }}</button>
-              </div>
-              <p v-if="job.current" class="muted">Current item <code>{{ job.current }}</code></p>
-              <ul v-if="job.failures.length" class="failure-list"><li v-for="(failure, index) in job.failures" :key="index"><code>{{ failure.item }}</code><span>{{ failure.message }}</span></li></ul>
-            </div>
+            <TransferJobDetail :job="job" :demo="demo" />
           </details>
         </div>
       </div>

@@ -11,7 +11,7 @@ fn tags_preserve_spaces_but_reject_duplicate_and_empty_keys() {
     assert!(validate_tags(&[tag("")]).is_err());
 }
 
-fn object_drawer_client(endpoint: &str) -> Client {
+pub(crate) fn object_drawer_client(endpoint: &str) -> Client {
     let config = aws_sdk_s3::Config::builder()
         .behavior_version_latest()
         .credentials_provider(aws_sdk_s3::config::Credentials::new(
@@ -29,7 +29,7 @@ fn object_drawer_client(endpoint: &str) -> Client {
     Client::from_conf(config)
 }
 
-fn object_drawer_mock(
+pub(crate) fn object_drawer_mock(
     responses: Vec<(&'static str, String, Vec<u8>)>,
 ) -> (String, std::thread::JoinHandle<Vec<String>>) {
     use std::{

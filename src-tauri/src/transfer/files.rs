@@ -10,6 +10,7 @@ use aws_sdk_s3::{
     types::{CompletedMultipartUpload, CompletedPart},
 };
 use tempfile::NamedTempFile;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use zip::{ZipWriter, write::SimpleFileOptions};
 
 use crate::{
@@ -44,6 +45,17 @@ pub async fn upload(
     path: &Path,
     options: UploadOptions,
 ) -> Result<UploadReceipt> {
+    upload_observed(client, bucket, key, path, options, &|_| Ok(())).await
+}
+
+pub async fn upload_observed(
+    client: &Client,
+    bucket: &str,
+    key: &str,
+    path: &Path,
+    options: UploadOptions,
+    observe: &(impl Fn(u64) -> Result<()> + Sync),
+) -> Result<UploadReceipt> {
     let info = tokio::fs::metadata(path).await?;
     if !info.is_file() {
         return Err(AppError::Invalid("Select regular files to upload.".into()));
@@ -52,7 +64,7 @@ pub async fn upload(
         repository::ensure_absent(client, bucket, key).await?;
     }
     if info.len() >= MULTIPART_THRESHOLD {
-        return multipart_upload(client, bucket, key, path, info.len(), options).await;
+        return multipart_upload(client, bucket, key, path, info.len(), options, observe).await;
     }
     let body = ByteStream::from_path(path)
         .await
@@ -85,6 +97,7 @@ async fn multipart_upload(
     path: &Path,
     size: u64,
     options: UploadOptions,
+    observe: &(impl Fn(u64) -> Result<()> + Sync),
 ) -> Result<UploadReceipt> {
     let started = client
         .create_multipart_upload()
@@ -102,12 +115,12 @@ async fn multipart_upload(
     let upload_id = repository::required_id(started.upload_id(), "multipart upload")?;
     let result = upload_parts(
         client,
-        bucket,
-        key,
+        (bucket, key),
         path,
         size,
         &upload_id,
         options.overwrite,
+        observe,
     )
     .await;
     if result.is_err()
@@ -126,12 +139,12 @@ async fn multipart_upload(
 
 async fn upload_parts(
     client: &Client,
-    bucket: &str,
-    key: &str,
+    (bucket, key): (&str, &str),
     path: &Path,
     size: u64,
     upload_id: &str,
     overwrite: bool,
+    observe: &(impl Fn(u64) -> Result<()> + Sync),
 ) -> Result<UploadReceipt> {
     let part_bytes = PART_BYTES.max(size.div_ceil(MAX_PARTS));
     let mut parts = Vec::new();
@@ -157,6 +170,7 @@ async fn upload_parts(
             .await
             .map_err(storage_error)?;
         let etag = repository::required_id(response.e_tag(), "part ETag")?;
+        observe(offset + part_bytes.min(size - offset))?;
         parts.push(
             CompletedPart::builder()
                 .part_number(part_number)
@@ -192,12 +206,13 @@ pub async fn download(
     object: &ObjectId,
     path: &Path,
     replace: bool,
-) -> Result<()> {
+    observe: &(impl Fn(u64) -> Result<()> + Sync),
+) -> Result<u64> {
     let directory = path
         .parent()
         .ok_or_else(|| AppError::Invalid("Choose a local destination.".into()))?;
     let mut temporary = NamedTempFile::new_in(directory)?;
-    stream_to_file(client, object, &mut temporary, None).await?;
+    let bytes = stream_to_file(client, object, &mut temporary, None, observe).await?;
     if replace {
         temporary.persist(path).map_err(|error| error.error)?;
     } else {
@@ -205,7 +220,7 @@ pub async fn download(
             .persist_noclobber(path)
             .map_err(|error| error.error)?;
     }
-    Ok(())
+    Ok(bytes)
 }
 
 pub async fn stream_to_file(
@@ -213,6 +228,7 @@ pub async fn stream_to_file(
     object: &ObjectId,
     file: &mut NamedTempFile,
     etag: Option<String>,
+    observe: &(impl Fn(u64) -> Result<()> + Sync),
 ) -> Result<u64> {
     let output = client
         .get_object()
@@ -224,7 +240,22 @@ pub async fn stream_to_file(
         .await
         .map_err(storage_error)?;
     let mut writer = tokio::fs::File::from_std(file.reopen()?);
-    let size = tokio::io::copy(&mut output.body.into_async_read(), &mut writer).await?;
+    let mut reader = output.body.into_async_read();
+    let mut buffer = vec![0; 64 * 1024];
+    let mut size = 0;
+    let mut reported = 0;
+    loop {
+        let length = reader.read(&mut buffer).await?;
+        if length == 0 {
+            break;
+        }
+        writer.write_all(&buffer[..length]).await?;
+        size += length as u64;
+        if size - reported >= 1024 * 1024 {
+            observe(size)?;
+            reported = size;
+        }
+    }
     writer.sync_all().await?;
     Ok(size)
 }
@@ -245,13 +276,67 @@ pub fn file_name(key: &str) -> Result<&str> {
 
 pub fn archive_safe_name(key: &str) -> Result<String> {
     if key.split('/').any(|segment| {
-        segment.is_empty() || matches!(segment, "." | "..") || segment.contains(['\\', ':', '\0'])
+        segment.is_empty()
+            || matches!(segment, "." | "..")
+            || segment.ends_with(['.', ' '])
+            || segment
+                .chars()
+                .any(|character| character.is_control() || "\\:*?\"<>|".contains(character))
+            || windows_device_name(segment)
     }) {
         return Err(AppError::Invalid(format!(
             "Cannot safely archive object key {key:?}."
         )));
     }
     Ok(key.into())
+}
+
+fn windows_device_name(segment: &str) -> bool {
+    let stem = segment
+        .split('.')
+        .next()
+        .unwrap_or_default()
+        .to_ascii_uppercase();
+    matches!(stem.as_str(), "CON" | "PRN" | "AUX" | "NUL")
+        || stem
+            .strip_prefix("COM")
+            .or_else(|| stem.strip_prefix("LPT"))
+            .is_some_and(|number| number.len() == 1 && matches!(number.as_bytes()[0], b'1'..=b'9'))
+}
+
+#[derive(Default)]
+pub struct ArchiveNames {
+    files: std::collections::HashSet<String>,
+    directories: std::collections::HashSet<String>,
+    explicit_directories: std::collections::HashSet<String>,
+}
+
+impl ArchiveNames {
+    pub fn reserve(&mut self, key: &str) -> Result<String> {
+        let directory = key.ends_with('/');
+        let name = archive_safe_name(key.strip_suffix('/').unwrap_or(key))?;
+        let normalized = name.to_lowercase();
+        let parents = normalized
+            .match_indices('/')
+            .map(|(index, _)| &normalized[..index]);
+        if self.files.contains(&normalized)
+            || (!directory && self.directories.contains(&normalized))
+            || (directory && self.explicit_directories.contains(&normalized))
+            || parents.clone().any(|parent| self.files.contains(parent))
+        {
+            return Err(AppError::Invalid(
+                "This ZIP entry conflicts with another selected path.".into(),
+            ));
+        }
+        self.directories.extend(parents.map(str::to_owned));
+        if directory {
+            self.directories.insert(normalized.clone());
+            self.explicit_directories.insert(normalized);
+        } else {
+            self.files.insert(normalized);
+        }
+        Ok(name)
+    }
 }
 
 pub fn archive_writer(target: &Path) -> Result<(NamedTempFile, ZipWriter<std::fs::File>)> {
@@ -261,6 +346,12 @@ pub fn archive_writer(target: &Path) -> Result<(NamedTempFile, ZipWriter<std::fs
     let file = NamedTempFile::new_in(directory)?;
     let writer = ZipWriter::new(file.reopen()?);
     Ok((file, writer))
+}
+
+pub fn archive_add_directory(writer: &mut ZipWriter<std::fs::File>, name: &str) -> Result<()> {
+    writer
+        .add_directory(name, SimpleFileOptions::default())
+        .map_err(|error| AppError::File(error.to_string()))
 }
 
 pub fn archive_add(

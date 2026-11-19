@@ -11,6 +11,11 @@ import Modal from '../../../components/ui/Modal.vue'
 import Notice from '../../../components/ui/Notice.vue'
 import BucketSettings from '../../bucket/components/BucketSettings.vue'
 import { workspaceAvailable } from '../../connection/model/workspace'
+import BrowserBatchMaintenance from '../../transfer/components/BrowserBatchMaintenance.vue'
+import BrowserBulkAttributesModal from '../../transfer/components/BrowserBulkAttributesModal.vue'
+import BrowserTransferQueue from '../../transfer/components/BrowserTransferQueue.vue'
+import type { BulkAttributes, VersionPlanItem, VersionRule } from '../../transfer/model/batch'
+import type { Transfer } from '../../transfer/model/transfer'
 import { useConnections } from '../../connection/store/connections'
 import { useWorkspaceNavigation } from '../../connection/store/workspace-navigation'
 import { readObjectPages } from '../api/listing'
@@ -27,7 +32,6 @@ import FolderDialog from './FolderDialog.vue'
 import ObjectInspector from './ObjectInspector.vue'
 import ObjectRowMenu from './ObjectRowMenu.vue'
 import ObjectTable from './ObjectTable.vue'
-import TagEditor from './TagEditor.vue'
 import VersionList from './VersionList.vue'
 
 const props = defineProps<{ demo: boolean; compact: boolean; embedded?: { connection: string; revision?: string | null; bucket: string } }>()
@@ -41,7 +45,13 @@ const canForward = computed(() => props.embedded ? historyIndex.value < embedded
 const connections = useConnections()
 const { tab, filter } = storeToRefs(browser)
 const folder = ref(false)
-const bulkTags = ref(false)
+const attributes = ref(false)
+const maintenance = ref(false)
+const selectedFolders = ref<string[]>([])
+const operationIds = ref<string[]>([])
+const submitting = ref(false)
+const renameObject = ref<ObjectId>()
+const renameDraft = ref('')
 const deleteItems = ref<ObjectId[]>([])
 const pasteReview = ref(false)
 const pathDraft = ref('')
@@ -58,7 +68,7 @@ const versionsTab = ref<HTMLButtonElement>()
 const rowMenu = ref<{ row: ObjectRow; x: number; y: number }>()
 let returnFocus: (() => void) | undefined
 let versionOpener: HTMLElement | undefined
-const { clipboard, failure, notice, run, enqueue, upload, download, archive, stage, paste } = useObjectActions(id => emit('job', id))
+const { clipboard, failure, notice, run, enqueue, upload, download, archive, stage, paste } = useObjectActions(rememberOperation)
 
 const rows = computed(() => browser.rows)
 const listingLocation = computed(() => JSON.stringify([browser.location.connection, browser.revision, browser.bucket, browser.prefix]))
@@ -80,20 +90,38 @@ const pathParts = computed(() => {
 const heading = computed(() => tab.value === 'Settings' ? browser.bucket : pathParts.value.at(-1)?.name ?? browser.bucket)
 const scope = computed(() => tab.value === 'Settings' ? 'Bucket-wide configuration' : browser.prefix ? 'Bucket prefix' : 'Bucket contents')
 const pasteSourceName = computed(() => connections.profiles.find(profile => profile.id === clipboard.value?.source.connection)?.name ?? 'Removed connection')
+const selectedCount = computed(() => browser.selected.length + selectedFolders.value.length)
+const stagedCount = computed(() => (clipboard.value?.objects.length ?? 0) + (clipboard.value?.folders.length ?? 0))
+const renameReady = computed(() => !!renameDraft.value && !renameDraft.value.includes('/') &&
+  renameDraft.value !== '.' && renameDraft.value !== '..' &&
+  renameDraft.value !== renameObject.value?.key.split('/').at(-1))
 const pasteDescription = computed(() => {
-  const count = clipboard.value?.objects.length ?? 0
-  return `${count} ${count === 1 ? 'object' : 'objects'} will be transferred. The job checks for existing destination keys before writing.`
+  const files = clipboard.value?.objects.length ?? 0
+  const folders = clipboard.value?.folders.length ?? 0
+  return files + ' files and ' + folders + ' folders are staged. Existing destination keys are skipped.'
 })
+const operationLocation = computed(() => browser.location)
+const pasteTargetName = computed(() => connections.active?.name)
+const pasteTargetPath = computed(() => 's3://' + browser.bucket + '/' + browser.prefix)
+const deleteDescription = computed(() => deleteItems.value.length === 1
+  ? deleteItems.value[0]?.key + ' will be deleted from ' + browser.bucket + '. Versioned buckets may retain a delete marker.'
+  : 'Delete ' + deleteItems.value.length + ' objects from ' + browser.bucket + '. Versioned buckets may retain delete markers.')
 const managerAvailable = computed(() => workspaceAvailable(connections.active, 'manager'))
 const readonly = computed(() => props.demo || !browser.bucket)
 
 watch(() => connections.contextKey, () => {
   folder.value = false
-  bulkTags.value = false
+  attributes.value = false
   deleteItems.value = []
   pasteReview.value = false
 }, { flush: 'sync' })
 watch(listingLocation, () => {
+  selectedFolders.value = []
+  attributes.value = false
+  maintenance.value = false
+  renameObject.value = undefined
+  pasteReview.value = false
+  deleteItems.value = []
   rowMenu.value = undefined
   returnFocus = undefined
   versionOpener = undefined
@@ -215,6 +243,27 @@ function actOnRow(action: (row: ObjectRow) => void): void {
   const row = rowMenu.value?.row
   closeRowMenu(true)
   if (row) action(row)
+}
+
+function rememberOperation(id: string): void {
+  operationIds.value = [id, ...operationIds.value].slice(0, 40)
+  emit('job', id)
+}
+
+function openRename(row: ObjectRow): void {
+  if (row.folder || row.deleteMarker) return
+  failure.value = ''
+  renameObject.value = objectId(browser.bucket, row.key)
+  renameDraft.value = row.key.split('/').at(-1) ?? ''
+}
+
+function renameMenuRow(): void {
+  actOnRow(openRename)
+}
+
+function stageMenuRow(move: boolean): void {
+  actOnRow(row => stage(selectionSource([objectId(browser.bucket, row.key)]), browser.revision,
+    row.folder ? [] : [objectId(browser.bucket, row.key)], row.folder ? [row.key] : [], move))
 }
 
 function openMenuRow(initialTab?: InspectorTab): void {
@@ -370,9 +419,37 @@ async function remove(): Promise<void> {
   })
 }
 
-async function setTags(tags: Tag[]): Promise<void> {
-  bulkTags.value = false
-  await run(() => enqueue({ kind: 'tag', connection: browser.location.connection, objects: browser.selectedObjects, tags }))
+async function submitOperation(transfer: Transfer, close: () => void): Promise<void> {
+  if (submitting.value) return
+  submitting.value = true
+  try {
+    await run(async () => {
+      await enqueue(transfer)
+      close()
+    })
+  } finally {
+    submitting.value = false
+  }
+}
+
+async function setAttributes(update: BulkAttributes): Promise<void> {
+  const objects = browser.selectedObjects
+  await submitOperation({ kind: 'attributes', source: selectionSource(objects), objects, folders: selectedFolders.value, update },
+    () => { attributes.value = false })
+}
+
+async function applyVersionPlan(rule: VersionRule, items: VersionPlanItem[]): Promise<void> {
+  await submitOperation({ kind: 'applyVersionPlan', source: browser.location, rule, items },
+    () => { maintenance.value = false })
+}
+
+async function rename(): Promise<void> {
+  const object = renameObject.value
+  if (!renameReady.value || !object) return
+  const source = selectionSource([object])
+  const target = { ...browser.location, prefix: object.key.slice(0, object.key.lastIndexOf('/') + 1) }
+  await submitOperation({ kind: 'copy', source, target, objects: [object], renameTo: renameDraft.value, moveSource: true, overwrite: false },
+    () => { renameObject.value = undefined })
 }
 
 async function removeBucket(): Promise<void> {
@@ -388,15 +465,28 @@ async function refresh(): Promise<void> {
 
 async function acceptPaste(): Promise<void> {
   pasteReview.value = false
-  await paste(browser.location)
+  const profile = connections.profiles.find(item => item.id === clipboard.value?.source.connection)
+  await paste(browser.location, profile?.revision ?? (profile ? null : undefined))
+}
+
+function selectionSource(objects: ObjectId[]): Location {
+  return objects.every(object => object.key.startsWith(browser.prefix))
+    ? browser.location
+    : { ...browser.location, prefix: '' }
+}
+
+function clearSelection(): void {
+  browser.selected = []
+  selectedFolders.value = []
 }
 
 function selectedStage(move: boolean): void {
-  const source = browser.selectedObjects.every(object => object.key.startsWith(browser.prefix))
-    ? browser.location
-    : { ...browser.location, prefix: '' }
-  stage(source, browser.selectedObjects, move)
-  browser.selected = []
+  stage(selectionSource(browser.selectedObjects), browser.revision, browser.selectedObjects, selectedFolders.value, move)
+  clearSelection()
+}
+
+function archiveSelection(): void {
+  void archive(selectionSource(browser.selectedObjects), browser.selectedObjects, selectedFolders.value)
 }
 
 async function copyPath(): Promise<void> {
@@ -457,6 +547,7 @@ async function copyPath(): Promise<void> {
                       <summary class="icon-button" title="More list actions" aria-label="More list actions"><Ellipsis :size="18" /></summary>
                       <div class="pop-menu">
                         <button @click="copyPath">Copy S3 path</button>
+                        <button :disabled="readonly" @click="failure = ''; maintenance = true">Prefix operations</button>
                         <button @click="pathDetails = !pathDetails">{{ pathDetails ? 'Hide path details' : 'Show path details' }}</button>
                         <button v-if="!embedded" :disabled="readonly || !managerAvailable" @click="emit('tools')">Prefix metrics and tools</button>
                       </div>
@@ -493,29 +584,30 @@ async function copyPath(): Promise<void> {
                 </div>
                 <BrowserListingOptions :browser="browser" @apply="applyListing" @reset="clearFilter" />
                 <Notice v-if="searchError" tone="error">{{ searchError }}</Notice>
-                <div v-if="browser.selected.length || clipboard" class="selection-bar">
-                  <span v-if="browser.selected.length"><ListFilter :size="15" /> {{ browser.selected.length }} selected</span>
-                  <span v-else>{{ clipboard?.objects.length }} ready to {{ clipboard?.move ? 'move' : 'copy' }}</span>
-                  <div v-if="browser.selected.length" class="selection-buttons">
-                    <button :disabled="readonly" @click="download(browser.location.connection, browser.selectedObjects)"><ArrowDownToLine :size="15" /><span>Download</span></button>
-                    <button :disabled="readonly" @click="archive(browser.location.connection, browser.selectedObjects)"><Archive :size="15" /><span>ZIP</span></button>
+                <div v-if="selectedCount || clipboard" class="selection-bar">
+                  <span v-if="selectedCount"><ListFilter :size="15" /> {{ selectedCount }} selected</span>
+                  <span v-else>{{ stagedCount }} ready to {{ clipboard?.move ? 'move' : 'copy' }}</span>
+                  <div v-if="selectedCount" class="selection-buttons">
+                    <button :disabled="readonly || !browser.selected.length || !!selectedFolders.length" @click="download(browser.location.connection, browser.selectedObjects)"><ArrowDownToLine :size="15" /><span>Download</span></button>
+                    <button :disabled="readonly" @click="archiveSelection"><Archive :size="15" /><span>ZIP</span></button>
                     <button :disabled="readonly" title="Stage copy" @click="selectedStage(false)"><Copy :size="15" /><span>Copy</span></button>
                     <button :disabled="readonly" title="Stage move" @click="selectedStage(true)"><Scissors :size="15" /><span>Cut</span></button>
-                    <button :disabled="readonly" @click="bulkTags = true">Tags</button>
-                    <button :disabled="readonly" class="danger-outline" aria-label="Delete selected objects" @click="beginDelete(browser.selectedObjects)"><Trash2 :size="15" /></button>
-                    <button class="icon-button subtle" aria-label="Clear selection" @click="browser.selected = []"><X :size="15" /></button>
+                    <button :disabled="readonly" @click="failure = ''; attributes = true">Attributes</button>
+                    <button :disabled="readonly || !browser.selected.length || !!selectedFolders.length" class="danger-outline" aria-label="Delete selected objects" @click="beginDelete(browser.selectedObjects)"><Trash2 :size="15" /></button>
+                    <button class="icon-button subtle" aria-label="Clear selection" @click="clearSelection"><X :size="15" /></button>
                   </div>
                   <div v-if="clipboard" class="selection-buttons"><button :disabled="readonly" @click="pasteReview = true"><ClipboardPaste :size="15" />Paste</button>
                     <button class="icon-button subtle" aria-label="Clear clipboard" @click="clipboard = undefined"><X :size="15" /></button>
                   </div>
                 </div>
 
+                <BrowserTransferQueue v-if="!demo" :operation-ids="operationIds" />
                 <FadeRegion>
                   <div :key="listingLocation">
                     <Notice v-if="browser.error" tone="error">{{ browser.error }}</Notice>
                     <Notice v-if="browser.deletedError" tone="error">Deleted objects unavailable. {{ browser.deletedError }}</Notice>
                     <p v-if="browser.loading" class="loading-line" role="status">Reading objects…</p>
-                    <ObjectTable v-if="rows.length" ref="objectTable" :browser="browser" :rows="rows" :compact="compact" @open="openRow" @menu="openRowMenu" @next="browser.loadRows(true)" @sort="sortBy" />
+                    <ObjectTable v-if="rows.length" ref="objectTable" v-model:selected-folders="selectedFolders" :browser="browser" :rows="rows" :compact="compact" @open="openRow" @menu="openRowMenu" @next="browser.loadRows(true)" @sort="sortBy" />
                     <EmptyState v-else-if="!browser.error && !browser.loading" :icon="Folder" :title="filter ? 'No matching objects' : 'This prefix is empty'"
                       :description="filter ? 'Try another search or clear the search text.' : 'Create a folder or upload files to this location.'">
                       <button v-if="filter" @click="clearFilter">Clear filter</button>
@@ -564,22 +656,34 @@ async function copyPath(): Promise<void> {
       </section>
     </FadeRegion>
 
-    <ObjectRowMenu v-if="rowMenu" v-bind="rowMenu" :demo="demo" @close="closeRowMenu" @open="openMenuRow" @download="downloadMenuRow" @copy="copyMenuRow" />
+    <ObjectRowMenu v-if="rowMenu" v-bind="rowMenu" :demo="demo" @close="closeRowMenu" @open="openMenuRow" @download="downloadMenuRow" @copy="copyMenuRow" @stage="stageMenuRow" @rename="renameMenuRow" />
 
     <FolderDialog v-if="folder" :location="browser.location" @close="folder = false" @created="folder = false; browser.loadRows()" />
-    <Modal v-if="bulkTags" title="Replace tags on selected objects" @close="bulkTags = false">
-      <div class="modal-form"><p class="muted">These tags will replace the tags on all {{ browser.selected.length }} selected objects.</p>
-        <TagEditor :tags="[]" @save="setTags" /></div>
+    <BrowserBulkAttributesModal v-if="attributes" :objects="browser.selected.length" :folders="selectedFolders.length"
+      :busy="submitting" :path="'s3://' + browser.bucket + '/' + selectionSource(browser.selectedObjects).prefix"
+      :error="failure" @close="attributes = false" @apply="setAttributes" />
+    <BrowserBatchMaintenance v-if="maintenance" :location="operationLocation" :submitting="submitting" :job-error="failure"
+      @close="maintenance = false" @job="applyVersionPlan" />
+    <Modal v-if="renameObject" title="Rename object" @close="renameObject = undefined">
+      <form class="modal-form" @submit.prevent="rename">
+        <p><code class="rename-key">{{ renameObject.key }}</code></p>
+        <label>New name<input v-model="renameDraft" required :disabled="submitting" /></label>
+        <p class="muted">The source is deleted after the provider confirms the new key.</p>
+        <Notice v-if="failure" tone="error">{{ failure }}</Notice>
+        <footer class="modal-actions"><button type="button" @click="renameObject = undefined">Cancel</button>
+          <button class="primary" :disabled="submitting || !renameReady">Rename object</button>
+        </footer>
+      </form>
     </Modal>
     <ConfirmDialog v-if="deleteItems.length" title="Delete selected objects?"
-      :description="deleteItems.length === 1 ? `${deleteItems[0]?.key} will be deleted from ${browser.bucket}. Versioned buckets may retain a delete marker.` : `Delete ${deleteItems.length} objects from ${browser.bucket}. Versioned buckets may retain delete markers.`"
+      :description="deleteDescription"
       action="Delete objects" danger @close="deleteItems = []" @confirm="remove" />
     <ConfirmDialog v-if="pasteReview && clipboard" :title="clipboard.move ? 'Move selected objects?' : 'Copy selected objects?'"
       :description="pasteDescription"
       :action="clipboard.move ? 'Move objects' : 'Copy objects'" @close="pasteReview = false" @confirm="acceptPaste">
       <dl class="transfer-route">
         <div><dt>Source</dt><dd>{{ pasteSourceName }}<code>s3://{{ clipboard.source.bucket }}/{{ clipboard.source.prefix }}</code></dd></div>
-        <div><dt>Destination</dt><dd>{{ connections.active?.name }}<code>s3://{{ browser.bucket }}/{{ browser.prefix }}</code></dd></div>
+        <div><dt>Destination</dt><dd>{{ pasteTargetName }}<code>{{ pasteTargetPath }}</code></dd></div>
       </dl>
     </ConfirmDialog>
   </div>
@@ -591,7 +695,8 @@ async function copyPath(): Promise<void> {
 .browser-host.embedded .listing-header { margin-bottom: 12px; }
 .browser-host.embedded .browser-layout { grid-template-columns: minmax(0, 1fr); }
 .browser-host.embedded .browser-layout:has(> .inspector) .listing { display: none; }
-.object-tools { flex-wrap: wrap; }
+.object-tools, .selection-buttons { flex-wrap: wrap; }
+.rename-key { white-space: pre-wrap; overflow-wrap: anywhere; }
 .object-search { max-width: 380px; }
 .object-search button { min-height: 27px; }
 .browser-path-tools { display: grid; gap: 7px; margin-bottom: 10px; }

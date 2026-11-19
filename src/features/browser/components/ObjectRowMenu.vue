@@ -4,11 +4,11 @@ import type { InspectorTab } from '../model/inspector'
 import type { ObjectRow } from '../model/objects'
 
 const props = defineProps<{ row: ObjectRow; x: number; y: number; demo: boolean }>()
-const emit = defineEmits<{ close: [restoreFocus: boolean]; open: [tab?: InspectorTab]; download: []; copy: [] }>()
+const emit = defineEmits<{ close: [restoreFocus: boolean]; open: [tab?: InspectorTab]; download: []; copy: []; stage: [move: boolean]; rename: [] }>()
 const menu = ref<HTMLElement>()
 const placement = computed(() => ({
   left: Math.max(8, Math.min(props.x, window.innerWidth - 190)) + 'px',
-  top: Math.max(8, Math.min(props.y, window.innerHeight - (props.row.folder || props.row.deleteMarker ? 90 : 240))) + 'px',
+  top: Math.max(8, Math.min(props.y, window.innerHeight - (props.row.deleteMarker ? 90 : props.row.folder ? 160 : 365))) + 'px',
 }))
 
 onMounted(() => {
@@ -46,6 +46,9 @@ function moveFocus(event: KeyboardEvent): void {
       <button v-if="!row.folder && !row.deleteMarker" @click="emit('open', 'Tags')">Object tags</button>
       <button v-if="!row.folder && !row.deleteMarker" @click="emit('open', 'Access')">Object access</button>
       <button v-if="!row.folder && !row.deleteMarker" :disabled="demo" @click="emit('download')">Download object</button>
+      <button v-if="!row.deleteMarker && !demo" @click="emit('stage', false)">Copy to clipboard</button>
+      <button v-if="!row.deleteMarker && !demo" @click="emit('stage', true)">Cut to clipboard</button>
+      <button v-if="!row.folder && !row.deleteMarker && !demo" @click="emit('rename')">Rename object</button>
       <button @click="emit('copy')">{{ row.folder ? 'Copy exact prefix' : 'Copy exact object key' }}</button>
     </div>
   </Teleport>

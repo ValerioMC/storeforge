@@ -4,7 +4,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::object::model::{Location, ObjectId, Tag};
+use crate::object::model::{Location, MetadataUpdate, ObjectId, RetentionMode, Tag};
 
 #[derive(Deserialize)]
 #[serde(
@@ -27,6 +27,11 @@ pub enum Transfer {
     Archive {
         connection: Uuid,
         objects: Vec<ObjectId>,
+        #[serde(default)]
+        folders: Vec<String>,
+        #[serde(default)]
+        prefix: String,
+        bucket: Option<String>,
         target: PathBuf,
     },
     Delete {
@@ -41,9 +46,23 @@ pub enum Transfer {
     Copy {
         source: Location,
         objects: Vec<ObjectId>,
+        #[serde(default)]
+        folders: Vec<String>,
+        rename_to: Option<String>,
         target: Location,
         move_source: bool,
         overwrite: bool,
+    },
+    Attributes {
+        source: Location,
+        objects: Vec<ObjectId>,
+        folders: Vec<String>,
+        update: BulkAttributes,
+    },
+    ApplyVersionPlan {
+        source: Location,
+        rule: VersionRule,
+        items: Vec<VersionPlanItem>,
     },
     Migrate {
         source: Location,
@@ -71,10 +90,67 @@ impl Transfer {
             Self::Copy {
                 move_source: true, ..
             } => "Move objects",
+            Self::Attributes { .. } => "Update bulk attributes",
+            Self::ApplyVersionPlan { .. } => "Apply version plan",
             Self::Migrate { .. } => "Migrate prefix",
             Self::Purge { .. } => "Purge objects",
         }
     }
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BulkAttributes {
+    pub metadata: Option<MetadataUpdate>,
+    pub tags: Option<Vec<Tag>>,
+    pub storage_class: Option<String>,
+    pub acl: Option<String>,
+    pub legal_hold: Option<bool>,
+    pub retention: Option<BulkRetention>,
+}
+
+#[derive(Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BulkRetention {
+    pub mode: RetentionMode,
+    pub until: String,
+    pub bypass_governance: bool,
+}
+
+#[derive(Deserialize)]
+#[serde(
+    tag = "kind",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
+pub enum VersionRule {
+    RestoreDeleted,
+    RestoreAt {
+        at: DateTime<Utc>,
+        delete_missing: bool,
+    },
+    Cleanup {
+        keep: Option<usize>,
+        before: Option<DateTime<Utc>>,
+        orphan_markers: bool,
+    },
+}
+
+#[derive(Clone, Copy, Deserialize, Eq, Hash, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum VersionAction {
+    Restore,
+    MarkDeleted,
+    DeleteVersion,
+}
+
+#[derive(Deserialize, Eq, Hash, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct VersionPlanItem {
+    pub key: String,
+    pub version_id: String,
+    pub expected_latest: String,
+    pub action: VersionAction,
 }
 
 #[derive(Clone, Copy, Deserialize, PartialEq, Serialize)]
@@ -106,6 +182,12 @@ pub struct Job {
     pub succeeded: usize,
     pub failed: usize,
     pub failures: Vec<JobFailure>,
+    #[serde(default)]
+    pub successful_items: Vec<String>,
+    #[serde(default)]
+    pub bytes_processed: u64,
+    #[serde(default)]
+    pub current_bytes: u64,
     pub current: Option<String>,
     pub cancel_requested: bool,
 }
