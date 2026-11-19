@@ -88,7 +88,7 @@ const workbenchRoute = computed(() => {
 })
 const workbenchProfiles = computed(() => {
   if (demo.value) return [demoConnection]
-  if (workbenchRoute.value?.source === 'storageOps') return managerProfiles.value
+  if (workbenchRoute.value?.source === 'storageOps') return managerProfiles.value.filter(profile => !profile.settings?.openstack)
   const active = connections.active
   return active && identityAvailable(active, 'cephAdmin') ? [active] : []
 })
@@ -112,6 +112,8 @@ const resource = computed(() => {
 const windowChrome = (window as Window & { __storeforgeWindowChrome?: 'overlay' | 'custom' }).__storeforgeWindowChrome
 const dragRegion = windowChrome ? 'deep' : undefined
 let timer: number | undefined
+let openStackTimer: number | undefined
+let checkingOpenStack = false
 let unlistenClose: (() => void) | undefined
 let closing = false
 let mounted = false
@@ -139,6 +141,7 @@ onMounted(() => {
   window.addEventListener('beforeunload', beforeUnload)
   if (isTauri()) {
     timer = window.setInterval(() => void jobs.load(), 1200)
+    openStackTimer = window.setInterval(() => void checkOpenStackProfiles(), 5000)
     void watchWindowClose()
   }
 })
@@ -147,6 +150,7 @@ onUnmounted(() => {
   mounted = false
   unlistenClose?.()
   if (timer !== undefined) window.clearInterval(timer)
+  if (openStackTimer !== undefined) window.clearInterval(openStackTimer)
   window.removeEventListener('keydown', keydown)
   window.removeEventListener('hashchange', followWorkbenchLink)
   window.removeEventListener('beforeunload', beforeUnload)
@@ -157,9 +161,25 @@ function findProfile(id: string): Connection | undefined {
 }
 
 function profileLabel(profile: Connection): string {
-  const scope = [profile.settings?.tenant, profile.settings?.account].filter(Boolean)
+  const scope = profile.settings?.openstack ? [] : [profile.settings?.tenant, profile.settings?.account].filter(Boolean)
   const tags = showTags.value ? profile.settings?.standardTags ?? [] : []
   return [profile.name, ...scope, ...tags].join(' · ')
+}
+
+async function checkOpenStackProfiles(): Promise<void> {
+  if (checkingOpenStack || !connections.profiles.some(profile => profile.settings?.openstack)) return
+  checkingOpenStack = true
+  const active = connections.active
+  try {
+    await connections.refreshProfiles(true)
+    if (active?.settings?.openstack && !findProfile(active.id)) {
+      startError.value = 'Sign in to OpenStack again to reopen the project workspace.'
+    }
+  } catch (failure) {
+    startError.value = errorMessage(failure)
+  } finally {
+    checkingOpenStack = false
+  }
 }
 
 function routeAllowed(candidate: WorkspaceRoute): boolean {
@@ -338,6 +358,7 @@ function selectContext(id: string): void {
 }
 
 function openProfile(profile: Connection): void {
+  if (profile.settings?.openstack) startError.value = ''
   openRoute(defaultRoute(profile))
 }
 
@@ -408,7 +429,7 @@ function showJob(id: string): void {
           </div>
           <div class="top-controls">
             <span v-if="demo" class="demo-label"><span class="status-dot online" /> Read-only demo</span>
-            <span v-else-if="connections.active" class="connection-status">{{ providerNames[connections.active.provider] }}</span>
+            <span v-else-if="connections.active" class="connection-status">{{ connections.active.settings?.openstack ? 'OpenStack' : providerNames[connections.active.provider] }}</span>
             <button class="icon-button subtle" type="button" :aria-label="`${workspaceNames[route.workspace]} help`" @click="help = true"><CircleHelp :size="18" /></button>
           </div>
           <WindowControls v-if="windowChrome === 'custom'" @error="startError = $event" />
@@ -466,7 +487,7 @@ function showJob(id: string): void {
             <ActivityWorkspace v-else-if="route.workspace === 'admin' && route.page === 'activity'" key="activity" :demo="demo" :preselected="route.jobId ?? null" :audit="route.audit"
               @browse="canBrowse ? go({ workspace: 'browser' }) : canManage ? go({ workspace: 'manager', page: 'buckets' }) : go({ workspace: 'admin', page: 'connections' })" />
             <WorkspacePreferences v-else-if="route.workspace === 'admin' && route.page === 'preferences'" v-model:compact="compact" v-model:show-tags="showTags"
-              v-model:startup="startup" :profiles="connections.profiles" />
+              v-model:startup="startup" :profiles="connections.profiles.filter(profile => !profile.settings?.openstack)" />
             <ConnectionsWorkspace v-else :has-draft="hasDraft" @add="openEditor()" @edit="openEditor" @browse="openProfile" @demo="openDemo" />
           </KeepAlive>
         </FadeRegion>

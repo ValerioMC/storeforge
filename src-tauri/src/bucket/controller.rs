@@ -33,7 +33,7 @@ pub async fn list_buckets(
     connections: State<'_, Arc<ConnectionService>>,
     connection: Uuid,
 ) -> Result<Vec<Bucket>> {
-    BucketService::list(&connections.session(connection)?).await
+    BucketService::list(&connections.bucket_session(connection)?).await
 }
 
 #[tauri::command]
@@ -167,7 +167,7 @@ pub async fn create_bucket(
     versioning: Option<bool>,
 ) -> Result<BucketCreation> {
     let result = BucketService::create(
-        &connections.session(connection)?,
+        &connections.bucket_session(connection)?,
         &bucket,
         object_lock,
         location.as_deref(),
@@ -195,7 +195,7 @@ pub async fn finish_bucket_versioning(
     location: Option<String>,
 ) -> Result<()> {
     let result = BucketService::finish_versioning(
-        &connections.session(connection)?,
+        &connections.bucket_session(connection)?,
         &bucket,
         location.as_deref(),
     )
@@ -210,7 +210,7 @@ pub async fn delete_bucket(
     connection: Uuid,
     bucket: String,
 ) -> Result<()> {
-    let result = BucketService::delete(&connections.session(connection)?, &bucket).await;
+    let result = BucketService::delete(&connections.bucket_session(connection)?, &bucket).await;
     audit.record(connection, "Delete bucket", Some(bucket), result)
 }
 
@@ -225,7 +225,7 @@ pub async fn configure_bucket(
 ) -> Result<String> {
     let write = !matches!(change, ConfigurationChange::Read);
     let result = repository::configure(
-        &connections.session(connection)?,
+        &connections.bucket_session(connection)?,
         &bucket,
         configuration,
         change,

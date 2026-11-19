@@ -1,4 +1,7 @@
-use std::{path::PathBuf, sync::Mutex};
+use std::{
+    path::{Path, PathBuf},
+    sync::Mutex,
+};
 
 use crate::common::{
     document::{read_document, write_document},
@@ -15,6 +18,10 @@ pub struct ConnectionRepository {
 }
 
 impl ConnectionRepository {
+    pub(crate) fn directory(&self) -> &Path {
+        &self.directory
+    }
+
     pub fn open(directory: PathBuf) -> Result<Self> {
         let profiles = read_document(&directory.join("connections.json"))?;
         Ok(Self {

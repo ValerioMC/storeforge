@@ -137,6 +137,7 @@ async fn query(
         },
         credentials: session.credentials.clone(),
         s3: session.s3.clone(),
+        openstack: session.openstack.clone(),
     };
     let request = request(
         Method::POST,

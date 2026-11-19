@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { computed, ref } from 'vue'
 import WorkspaceHeader from '../../../components/shell/WorkspaceHeader.vue'
 import { Cable, CirclePlus, Pencil, Server, Trash2 } from 'lucide-vue-next'
 import EmptyState from '../../../components/ui/EmptyState.vue'
@@ -8,10 +8,12 @@ import Notice from '../../../components/ui/Notice.vue'
 import { errorMessage } from '../../../common/tauri'
 import { capabilityNames, identityCapability, providerNames, type Connection } from '../model/connection'
 import { useConnections } from '../store/connections'
+import OpenStackConnections from './OpenStackConnections.vue'
 
 defineProps<{ hasDraft: boolean }>()
 const emit = defineEmits<{ add: []; edit: [profile: Connection]; browse: [profile: Connection]; demo: [] }>()
 const connections = useConnections()
+const savedProfiles = computed(() => connections.profiles.filter(profile => !profile.settings?.openstack))
 const removing = ref<Connection>()
 const error = ref('')
 
@@ -40,8 +42,8 @@ async function removeProfile(): Promise<void> {
       </template>
     </WorkspaceHeader>
     <Notice v-if="error" tone="error">{{ error }}</Notice>
-    <div v-if="connections.profiles.length" class="settings-sheet">
-      <div v-for="profile in connections.profiles" :key="profile.id" class="settings-row">
+    <div v-if="savedProfiles.length" class="settings-sheet">
+      <div v-for="profile in savedProfiles" :key="profile.id" class="settings-row">
         <span class="file-icon"><Server :size="19" /></span>
         <div class="settings-description">
           <strong>{{ profile.name }}</strong>
@@ -65,6 +67,7 @@ async function removeProfile(): Promise<void> {
     <EmptyState v-else :icon="Cable" title="No saved connections" description="Add an Amazon S3, Ceph RGW or other S3-compatible endpoint.">
       <button @click="emit('demo')">Explore the demo</button>
     </EmptyState>
+    <OpenStackConnections @browse="useProfile" />
     <ConfirmDialog v-if="removing" title="Remove connection?" :description="`${removing.name} and its credentials will be removed from this device.`"
       action="Remove connection" danger @close="removing = undefined" @confirm="removeProfile" />
   </section>

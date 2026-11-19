@@ -40,7 +40,7 @@ pub fn run() {
             let directory = app.path().app_data_dir()?;
             let connections = Arc::new(ConnectionService::new(ConnectionRepository::open(
                 directory.clone(),
-            )?));
+            )?)?);
             let transfers = TransferService::new(
                 JobRepository::open(directory.clone())?,
                 Arc::clone(&connections),
@@ -64,6 +64,12 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             connection_commands::list_connections,
+            connection_commands::list_openstack_clouds,
+            connection_commands::save_openstack_cloud,
+            connection_commands::disconnect_openstack_cloud,
+            connection_commands::authenticate_openstack,
+            connection_commands::discover_openstack_project,
+            connection_commands::activate_openstack_project,
             connection_commands::save_connection,
             connection_commands::remove_connection,
             connection_commands::test_connection,

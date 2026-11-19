@@ -1,9 +1,9 @@
-use std::{collections::BTreeMap, time::Duration};
+use std::{collections::BTreeMap, sync::Arc, time::Duration};
 
 use aws_sdk_s3::{
     Client,
     config::{
-        BehaviorVersion, Credentials, Region, RequestChecksumCalculation,
+        BehaviorVersion, Credentials, IdentityCache, Region, RequestChecksumCalculation,
         ResponseChecksumValidation,
     },
 };
@@ -23,6 +23,7 @@ use super::{
         IdentityKind, ManagedIamOwner, ManagedRgwOwner, Provider, Secret, ServiceDraft,
         ServiceIdentity, StoredConnection, Workspace,
     },
+    openstack::service::{OpenStackLease, OpenStackService, ProjectCredentials},
     repository::{ConnectionRepository, CredentialRepository, KeyringRepository},
 };
 
@@ -33,11 +34,13 @@ pub struct Session {
     pub profile: Connection,
     pub credentials: Credentials,
     pub s3: Client,
+    pub(crate) openstack: Option<Arc<OpenStackLease>>,
 }
 
 pub struct ConnectionService {
-    repository: ConnectionRepository,
+    repository: Arc<ConnectionRepository>,
     credentials: Box<dyn CredentialRepository>,
+    pub(crate) openstack: OpenStackService,
 }
 
 struct PreparedConnection {
@@ -47,11 +50,8 @@ struct PreparedConnection {
 }
 
 impl ConnectionService {
-    pub fn new(repository: ConnectionRepository) -> Self {
-        Self {
-            repository,
-            credentials: Box::new(KeyringRepository),
-        }
+    pub fn new(repository: ConnectionRepository) -> Result<Self> {
+        Self::open(repository, Box::new(KeyringRepository))
     }
 
     #[cfg(test)]
@@ -59,15 +59,31 @@ impl ConnectionService {
         repository: ConnectionRepository,
         credentials: impl CredentialRepository + 'static,
     ) -> Self {
-        Self {
+        Self::open(repository, Box::new(credentials)).unwrap()
+    }
+
+    fn open(
+        repository: ConnectionRepository,
+        credentials: Box<dyn CredentialRepository>,
+    ) -> Result<Self> {
+        let repository = Arc::new(repository);
+        let openstack = OpenStackService::open(Arc::clone(&repository))?;
+        Ok(Self {
             repository,
-            credentials: Box::new(credentials),
-        }
+            credentials,
+            openstack,
+        })
     }
 
     pub fn list(&self) -> Result<Vec<Connection>> {
-        self.repository
-            .read(|entries| Ok(entries.iter().map(|entry| entry.profile.clone()).collect()))
+        let mut profiles = self.repository.read(|entries| {
+            Ok(entries
+                .iter()
+                .map(|entry| entry.profile.clone())
+                .collect::<Vec<_>>())
+        })?;
+        profiles.extend(self.openstack.profiles()?);
+        Ok(profiles)
     }
 
     pub(crate) fn with_profile<T>(
@@ -75,6 +91,9 @@ impl ConnectionService {
         id: Uuid,
         read: impl FnOnce(&Connection) -> Result<T>,
     ) -> Result<T> {
+        if let Some(lease) = self.openstack.lease(id)? {
+            return read(&lease.profile);
+        }
         self.repository
             .read(|entries| read(&profile_by_id(entries, id)?.profile))
     }
@@ -211,12 +230,27 @@ impl ConnectionService {
         self.session_for(id, Workspace::Browser, IdentityKind::S3)
     }
 
+    pub(crate) fn bucket_session(&self, id: Uuid) -> Result<Session> {
+        if let Some(lease) = self.openstack.lease(id)? {
+            let workspace = if lease.profile.settings.browser_enabled {
+                Workspace::Browser
+            } else {
+                Workspace::Manager
+            };
+            return openstack_session(lease, workspace, IdentityKind::S3);
+        }
+        self.session(id)
+    }
+
     pub fn session_for(
         &self,
         id: Uuid,
         workspace: Workspace,
         identity: IdentityKind,
     ) -> Result<Session> {
+        if let Some(lease) = self.openstack.lease(id)? {
+            return openstack_session(lease, workspace, identity);
+        }
         let (profile, context, secret) = self.repository.read(|entries| {
             let entry = profile_by_id(entries, id)?;
             let context = resolve_context(&entry.profile, workspace, identity)?;
@@ -497,6 +531,7 @@ fn validate_profile(
         .unwrap_or_default();
     settings.managed_iam = None;
     settings.managed_rgw = None;
+    settings.openstack = None;
     settings.tenant = settings.tenant.trim().into();
     settings.account = settings.account.trim().into();
     settings.realm = settings.realm.trim().into();
@@ -706,10 +741,43 @@ pub fn open_session(
         None,
         "storeforge",
     );
+    build_session(profile, context, credentials, None)
+}
+
+fn openstack_session(
+    lease: Arc<OpenStackLease>,
+    workspace: Workspace,
+    identity: IdentityKind,
+) -> Result<Session> {
+    let profile = &lease.profile;
+    let enabled = match workspace {
+        Workspace::Browser => profile.settings.browser_enabled,
+        Workspace::Manager => profile.settings.manager_enabled,
+        _ => false,
+    };
+    if !enabled || identity != IdentityKind::S3 {
+        return Err(AppError::Invalid(
+            "This workspace is unavailable for the OpenStack project.".into(),
+        ));
+    }
+    let context = resolve_context(profile, workspace, identity)?;
+    build_session(
+        profile.clone(),
+        context,
+        lease.credentials.clone(),
+        Some(lease),
+    )
+}
+
+fn build_session(
+    profile: Connection,
+    context: ExecutionContext,
+    credentials: Credentials,
+    openstack: Option<Arc<OpenStackLease>>,
+) -> Result<Session> {
     let mut builder = aws_sdk_s3::Config::builder()
         .behavior_version(BehaviorVersion::latest())
         .region(Region::new(profile.region.clone()))
-        .credentials_provider(credentials.clone())
         .force_path_style(profile.path_style)
         .request_checksum_calculation(RequestChecksumCalculation::WhenRequired)
         .response_checksum_validation(ResponseChecksumValidation::WhenRequired);
@@ -733,9 +801,39 @@ pub fn open_session(
     Ok(Session {
         profile,
         context,
+        s3: Client::from_conf(
+            s3_credentials(builder, credentials.clone(), openstack.clone()).build(),
+        ),
         credentials,
-        s3: Client::from_conf(builder.build()),
+        openstack,
     })
+}
+
+impl Session {
+    pub(crate) async fn validate(&self) -> Result<()> {
+        if let Some(lease) = &self.openstack {
+            lease.validate().await?;
+        }
+        Ok(())
+    }
+
+    pub(crate) fn s3_with_credentials(&self, credentials: Credentials) -> Client {
+        let builder = self.s3.config().to_builder();
+        Client::from_conf(s3_credentials(builder, credentials, self.openstack.clone()).build())
+    }
+}
+
+fn s3_credentials(
+    builder: aws_sdk_s3::config::Builder,
+    credentials: Credentials,
+    openstack: Option<Arc<OpenStackLease>>,
+) -> aws_sdk_s3::config::Builder {
+    match openstack {
+        Some(lease) => builder
+            .identity_cache(IdentityCache::no_cache())
+            .credentials_provider(ProjectCredentials { lease, credentials }),
+        None => builder.credentials_provider(credentials),
+    }
 }
 
 #[cfg(test)]

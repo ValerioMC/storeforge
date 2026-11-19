@@ -92,10 +92,11 @@ async function open(id: string): Promise<void> {
   <div class="panel-form">
     <div class="stage-heading">
       <div><h2>Personal access</h2><p>Open or retire private connections provisioned from this IAM account.</p></div>
-      <button v-if="!profile.settings?.managedIam" class="primary" :disabled="busy" @click="creating = true"><Plus :size="16" /> Provision connection</button>
+      <button v-if="!profile.settings?.managedIam && !profile.settings?.openstack" class="primary" :disabled="busy" @click="creating = true"><Plus :size="16" /> Provision connection</button>
     </div>
     <div class="panel-actions"><button :disabled="busy || loading" @click="refresh"><RefreshCw :size="15" /> Refresh</button></div>
-    <Notice v-if="profile.settings?.managedIam">Use the administrator connection to manage this profile’s IAM identity.</Notice>
+    <Notice v-if="profile.settings?.openstack">Use a direct administrator connection to provision IAM access.</Notice>
+    <Notice v-else-if="profile.settings?.managedIam">Use the administrator connection to manage this profile’s IAM identity.</Notice>
     <Notice v-if="error" tone="error">{{ error }}</Notice>
     <p v-else-if="loading" role="status">Loading private connections…</p>
     <p v-else-if="!records.length" class="muted">No private connections provisioned from this profile.</p>

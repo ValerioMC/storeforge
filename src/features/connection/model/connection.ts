@@ -1,3 +1,5 @@
+import type { OpenStackProfile } from './openstack'
+
 export type Provider = 'aws' | 'ceph' | 'compatible'
 export type ServiceIdentityKind = 'adminOps' | 'runtime' | 'supervision' | 'cephAdmin'
 export type IdentityKind = 's3' | ServiceIdentityKind
@@ -23,6 +25,7 @@ export interface EndpointSettings {
   coordinates?: EndpointCoordinates | null
   managedIam?: ManagedIamOwner | null
   managedRgw?: ManagedRgwOwner | null
+  openstack?: OpenStackProfile | null
 }
 
 export interface ManagedIamOwner {

@@ -61,6 +61,11 @@ impl PrivateAccessService {
     ) -> Result<Option<PrivateAccess>> {
         let _change = self.changes.lock().await;
         let session = connections.session_for(connection, Workspace::Manager, IdentityKind::S3)?;
+        if session.profile.settings.openstack.is_some() {
+            return Err(AppError::Invalid(
+                "Use a direct administrator connection to provision IAM access.".into(),
+            ));
+        }
         if session.profile.settings.managed_iam.is_some() {
             return Err(protected_identity());
         }

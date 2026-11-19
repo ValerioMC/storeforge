@@ -14,6 +14,8 @@ pub enum AppError {
     Storage(String),
     #[error("{0}")]
     AmbiguousWrite(String),
+    #[error("{0}")]
+    Reauthenticate(String),
     #[error("Local file: {0}")]
     File(String),
     #[error("Credential store: {0}")]

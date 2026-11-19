@@ -154,10 +154,10 @@ fn mock_endpoint(
 async fn execution_context_signs_a_mutation_with_the_selected_tenants_credential() {
     let (endpoint, requests) = mock_endpoint(vec![("200 OK", "")]);
     let directory = tempfile::tempdir().unwrap();
-    let service = ConnectionService {
-        repository: ConnectionRepository::open(directory.path().into()).unwrap(),
-        credentials: Box::<MockKeyring>::default(),
-    };
+    let service = ConnectionService::with_credentials(
+        ConnectionRepository::open(directory.path().into()).unwrap(),
+        MockKeyring::default(),
+    );
     let first = service
         .save(draft_for(&endpoint, "tenant-a", "ordinary-a"))
         .await
@@ -196,10 +196,10 @@ async fn execution_context_signs_a_mutation_with_the_selected_tenants_credential
 async fn execution_context_reconciles_only_selected_services_and_guards_denied_identities() {
     let (endpoint, requests) = mock_endpoint(vec![("200 OK", "[]"), ("403 Forbidden", "{}")]);
     let directory = tempfile::tempdir().unwrap();
-    let service = ConnectionService {
-        repository: ConnectionRepository::open(directory.path().into()).unwrap(),
-        credentials: Box::<MockKeyring>::default(),
-    };
+    let service = ConnectionService::with_credentials(
+        ConnectionRepository::open(directory.path().into()).unwrap(),
+        MockKeyring::default(),
+    );
     let mut draft = draft_for(&endpoint, "tenant-a", "ordinary");
     draft.reconcile.insert(
         IdentityKind::CephAdmin,

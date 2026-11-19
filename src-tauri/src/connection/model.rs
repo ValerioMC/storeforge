@@ -3,6 +3,8 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+use super::openstack::model::OpenStackProfile;
+
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Provider {
@@ -80,6 +82,8 @@ pub struct EndpointSettings {
     pub coordinates: Option<EndpointCoordinates>,
     pub managed_iam: Option<ManagedIamOwner>,
     pub managed_rgw: Option<ManagedRgwOwner>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub openstack: Option<OpenStackProfile>,
 }
 
 impl Default for EndpointSettings {
@@ -98,6 +102,7 @@ impl Default for EndpointSettings {
             coordinates: None,
             managed_iam: None,
             managed_rgw: None,
+            openstack: None,
         }
     }
 }

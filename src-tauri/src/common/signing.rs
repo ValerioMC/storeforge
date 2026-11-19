@@ -64,6 +64,7 @@ impl SignedClient {
         service: &str,
         request: http::Request<Vec<u8>>,
     ) -> Result<(StatusCode, String)> {
+        session.validate().await?;
         let request = sign_request(session, service, request)?;
         let (parts, body) = request.into_parts();
         let response = self

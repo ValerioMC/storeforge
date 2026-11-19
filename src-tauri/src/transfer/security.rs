@@ -186,13 +186,8 @@ impl OperationAccess {
         };
         let credentials = sts::assume(session, role, scope, self.encryption.as_ref()).await?;
         let expiration = credentials.expiry().map(DateTime::<Utc>::from);
-        let config = session
-            .s3
-            .config()
-            .to_builder()
-            .credentials_provider(credentials);
         Ok(OperationClient {
-            client: Client::from_conf(config.build()),
+            client: session.s3_with_credentials(credentials),
             expiration,
         })
     }
