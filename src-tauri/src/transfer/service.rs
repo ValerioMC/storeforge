@@ -10,7 +10,7 @@ use tempfile::NamedTempFile;
 use uuid::Uuid;
 
 use crate::{
-    common::error::{AppError, Result, storage_error},
+    common::error::{AppError, Result},
     connection::service::{ConnectionService, Session},
     object::{
         model::{Location, ObjectChange, ObjectId, Tag},
@@ -25,6 +25,8 @@ use super::{
     inventory,
     model::{BulkAttributes, Job, JobFailure, JobStatus, Transfer, VersionPlanItem, VersionRule},
     repository::JobRepository,
+    security::{AccessInput, OperationAccess, UploadAccess, transfer_error, write_client},
+    sts::RoleScope,
 };
 
 #[derive(Clone)]
@@ -66,7 +68,21 @@ impl TransferService {
         Ok(())
     }
 
-    pub fn start(&self, transfer: Transfer) -> Result<Uuid> {
+    pub fn start(&self, transfer: Transfer, access: Option<AccessInput>) -> Result<Uuid> {
+        if access.is_some()
+            && !matches!(
+                &transfer,
+                Transfer::Upload { .. } | Transfer::Download { .. }
+            )
+        {
+            return Err(AppError::Invalid(
+                "Transfer credentials apply to uploads and downloads.".into(),
+            ));
+        }
+        let access = OperationAccess::parse(
+            access.unwrap_or_default(),
+            matches!(&transfer, Transfer::Upload { .. }),
+        )?;
         let id = Uuid::new_v4();
         let label = transfer.label().into();
         self.jobs.insert(Job {
@@ -91,7 +107,7 @@ impl TransferService {
                 id,
                 jobs: &service.jobs,
             };
-            let result = service.run(&progress, transfer).await;
+            let result = service.run(&progress, transfer, &access).await;
             if let Err(error) = progress.finish(result) {
                 tracing::error!(%error, %id, "Could not persist transfer finish");
             }
@@ -99,20 +115,28 @@ impl TransferService {
         Ok(id)
     }
 
-    async fn run(&self, progress: &Progress<'_>, transfer: Transfer) -> Result<()> {
+    async fn run(
+        &self,
+        progress: &Progress<'_>,
+        transfer: Transfer,
+        access: &OperationAccess,
+    ) -> Result<()> {
         match transfer {
             Transfer::Upload {
                 target,
                 paths,
                 overwrite,
-            } => self.upload(progress, target, paths, overwrite).await,
+            } => {
+                self.upload(progress, target, paths, overwrite, access)
+                    .await
+            }
             Transfer::Download {
                 connection,
                 objects,
                 target,
                 directory,
             } => {
-                self.download(progress, connection, objects, &target, directory)
+                self.download(progress, connection, objects, &target, directory, access)
                     .await
             }
             Transfer::Archive {
@@ -252,15 +276,41 @@ impl TransferService {
         target: Location,
         paths: Vec<PathBuf>,
         overwrite: bool,
+        access: &OperationAccess,
     ) -> Result<()> {
-        let client = self.connections.session(target.connection)?.s3;
+        let session = self.connections.session(target.connection)?;
+        let keys = if access.role_arn.is_some() {
+            paths
+                .iter()
+                .map(|path| upload_key(&target, path))
+                .collect::<Result<Vec<_>>>()?
+        } else {
+            Vec::new()
+        };
+        let client = access
+            .client(
+                &session,
+                RoleScope::Write {
+                    bucket: &target.bucket,
+                    keys: &keys,
+                },
+            )
+            .await?;
         progress.set_total(paths.len())?;
         for path in paths {
             let item = path.to_string_lossy();
             if !progress.begin(&item)? {
                 break;
             }
-            let result = upload_file(&client, &target, &path, overwrite, progress).await;
+            let result = upload_file(
+                client.client()?,
+                &target,
+                &path,
+                overwrite,
+                access.upload_access(),
+                progress,
+            )
+            .await;
             progress.record_bytes(&item, result)?;
         }
         Ok(())
@@ -273,19 +323,29 @@ impl TransferService {
         items: Vec<ObjectId>,
         target: &Path,
         directory: bool,
+        access: &OperationAccess,
     ) -> Result<()> {
         if !directory && items.len() != 1 {
             return Err(AppError::Invalid(
                 "Choose a folder for multiple downloads.".into(),
             ));
         }
-        let client = self.connections.session(connection)?.s3;
+        let session = self.connections.session(connection)?;
+        let client = access.client(&session, RoleScope::Read(&items)).await?;
         progress.set_total(items.len())?;
         for object in items {
             if !progress.begin(&object.key)? {
                 break;
             }
-            let result = download_file(&client, &object, target, directory, progress).await;
+            let result = download_file(
+                client.client()?,
+                &object,
+                target,
+                directory,
+                access,
+                progress,
+            )
+            .await;
             progress.record_bytes(&object.key, result)?;
         }
         Ok(())
@@ -548,10 +608,11 @@ async fn upload_file(
     target: &Location,
     path: &Path,
     overwrite: bool,
+    access: UploadAccess<'_>,
     progress: &Progress<'_>,
 ) -> Result<u64> {
     let bytes = tokio::fs::metadata(path).await?.len();
-    let key = format!("{}{}", target.prefix, files::path_name(path)?);
+    let key = upload_key(target, path)?;
     let content_type = mime_guess::from_path(path)
         .first_or_octet_stream()
         .to_string();
@@ -563,6 +624,7 @@ async fn upload_file(
         UploadOptions {
             content_type,
             overwrite,
+            access,
             ..UploadOptions::default()
         },
         &|bytes| progress.update_bytes(bytes),
@@ -571,17 +633,27 @@ async fn upload_file(
     Ok(bytes)
 }
 
+fn upload_key(target: &Location, path: &Path) -> Result<String> {
+    Ok(format!("{}{}", target.prefix, files::path_name(path)?))
+}
+
 async fn download_file(
     client: &Client,
     object: &ObjectId,
     target: &Path,
     directory: bool,
+    access: &OperationAccess,
     progress: &Progress<'_>,
 ) -> Result<u64> {
     let path = files::download_target(target, directory, object)?;
-    files::download(client, object, &path, !directory, &|bytes| {
-        progress.update_bytes(bytes)
-    })
+    files::download(
+        client,
+        object,
+        &path,
+        !directory,
+        access.read_access(),
+        &|bytes| progress.update_bytes(bytes),
+    )
     .await
 }
 
@@ -608,9 +680,14 @@ async fn archive_item(
     }
     let name = names.reserve(relative)?;
     let mut temporary = NamedTempFile::new()?;
-    let size = files::stream_to_file(client, object, &mut temporary, None, &|bytes| {
-        progress.update_bytes(bytes)
-    })
+    let size = files::stream_to_file(
+        client,
+        object,
+        &mut temporary,
+        None,
+        Default::default(),
+        &|bytes| progress.update_bytes(bytes),
+    )
     .await?;
     files::archive_add(writer, &name, &mut temporary.reopen()?)?;
     Ok(size)
@@ -798,7 +875,7 @@ async fn copy_inside_endpoint(
     key: &str,
     etag: Option<String>,
 ) -> Result<UploadReceipt> {
-    let copied = client
+    let copied = write_client(client)
         .copy_object()
         .bucket(bucket)
         .key(key)
@@ -806,7 +883,7 @@ async fn copy_inside_endpoint(
         .set_copy_source_if_match(etag)
         .send()
         .await
-        .map_err(storage_error)?;
+        .map_err(|error| transfer_error(error, false, true))?;
     Ok(UploadReceipt {
         etag: copied.copy_object_result.and_then(|result| result.e_tag),
         version_id: copied.version_id,
@@ -823,9 +900,14 @@ async fn copy_via_disk(
     progress: &Progress<'_>,
 ) -> Result<UploadReceipt> {
     let mut file = NamedTempFile::new()?;
-    let size = files::stream_to_file(source, object, &mut file, source_info.e_tag, &|bytes| {
-        progress.update_bytes(bytes)
-    })
+    let size = files::stream_to_file(
+        source,
+        object,
+        &mut file,
+        source_info.e_tag,
+        Default::default(),
+        &|bytes| progress.update_bytes(bytes),
+    )
     .await?;
     if Some(size as i64) != source_info.content_length {
         return Err(AppError::Storage(
@@ -848,6 +930,7 @@ async fn copy_via_disk(
             content_disposition: source_info.content_disposition,
             content_encoding: source_info.content_encoding,
             content_language: source_info.content_language,
+            ..UploadOptions::default()
         },
     )
     .await
@@ -886,7 +969,7 @@ async fn delete_moved_source(
             "The source changed during the move. The destination was copied and the source was kept.".into(),
         ));
     }
-    client
+    write_client(client)
         .delete_object()
         .bucket(&object.bucket)
         .key(&object.key)
@@ -894,7 +977,7 @@ async fn delete_moved_source(
         .if_match(etag)
         .send()
         .await
-        .map_err(storage_error)?;
+        .map_err(|error| transfer_error(error, false, true))?;
     Ok(())
 }
 

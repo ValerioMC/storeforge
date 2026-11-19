@@ -59,6 +59,7 @@ pub(crate) fn object_drawer_mock(
                         Err(error) => panic!("Missing mock request: {error}"),
                     }
                 };
+                stream.set_nonblocking(false).unwrap();
                 stream
                     .set_read_timeout(Some(Duration::from_secs(2)))
                     .unwrap();
@@ -95,9 +96,13 @@ async fn object_drawer_requests_a_bounded_range_for_the_exact_historical_text_ob
         key: "logs// / report.csv ".into(),
         version_id: Some("version /+".into()),
     };
-    let preview = ObjectService::preview(&object_drawer_client(&endpoint), &object)
-        .await
-        .unwrap();
+    let preview = ObjectService::preview(
+        &object_drawer_client(&endpoint),
+        &object,
+        Default::default(),
+    )
+    .await
+    .unwrap();
     let requests = worker.join().unwrap();
     assert_eq!(preview.content_type, "text/csv");
     assert!(preview.truncated);
@@ -146,11 +151,15 @@ async fn object_drawer_checks_object_and_media_bounds_before_exposing_payloads()
         key: "large.mp4".into(),
         version_id: None,
     };
-    let large = ObjectService::preview(&client, &object).await.unwrap();
+    let large = ObjectService::preview(&client, &object, Default::default())
+        .await
+        .unwrap();
     assert!(large.oversized);
     assert!(large.data.is_empty());
     object.key = "first.pdf".into();
-    let pdf = ObjectService::preview(&client, &object).await.unwrap();
+    let pdf = ObjectService::preview(&client, &object, Default::default())
+        .await
+        .unwrap();
     assert_eq!(pdf.content_type, "application/pdf");
     assert!(matches!(pdf.kind, PreviewKind::Pdf));
     assert_eq!(STANDARD.decode(pdf.data).unwrap(), b"%PDF");

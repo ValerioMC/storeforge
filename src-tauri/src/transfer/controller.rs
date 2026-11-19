@@ -12,6 +12,7 @@ use crate::{
 use super::{
     batch, inventory,
     model::{Comparison, Integrity, Job, Transfer, Usage, VersionPlanItem, VersionRule},
+    security::AccessInput,
     service::TransferService,
 };
 
@@ -21,8 +22,12 @@ pub fn list_jobs(transfers: State<'_, TransferService>) -> Result<Vec<Job>> {
 }
 
 #[tauri::command]
-pub fn start_transfer(transfers: State<'_, TransferService>, transfer: Transfer) -> Result<Uuid> {
-    transfers.start(transfer)
+pub fn start_transfer(
+    transfers: State<'_, TransferService>,
+    transfer: Transfer,
+    access: Option<AccessInput>,
+) -> Result<Uuid> {
+    transfers.start(transfer, access)
 }
 
 #[tauri::command]

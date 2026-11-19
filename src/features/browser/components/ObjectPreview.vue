@@ -1,15 +1,19 @@
 <script setup lang="ts">
 import { computed, defineAsyncComponent, onUnmounted, ref, shallowRef, watch } from 'vue'
-import { FileQuestion } from 'lucide-vue-next'
+import { FileQuestion, KeyRound } from 'lucide-vue-next'
 import { errorMessage } from '../../../common/tauri'
 import EmptyState from '../../../components/ui/EmptyState.vue'
 import Notice from '../../../components/ui/Notice.vue'
+import TransferAccessModal from '../../transfer/components/TransferAccessModal.vue'
+import type { TransferAccess } from '../../transfer/model/access'
 import { objectsApi } from '../api/objects'
 import type { ObjectId, Preview } from '../model/objects'
 import { decodePreview, decodePreviewText, previewText, searchPreview, type TextPreview } from '../model/preview'
 
 const PdfPreview = defineAsyncComponent(() => import('./PdfPreview.vue'))
 const props = defineProps<{ connection: string; object: ObjectId }>()
+const emit = defineEmits<{ protected: [] }>()
+const choosingAccess = ref(false)
 const error = ref('')
 const busy = ref(false)
 const text = ref<TextPreview>()
@@ -24,7 +28,10 @@ const matches = computed(() => searchPreview(text.value?.raw ?? '', query.value)
 const matchCount = computed(() => matches.value.filter(part => part.match).length)
 let request = 0
 
-watch(() => [props.connection, props.object.bucket, props.object.key, props.object.versionId], () => void load(), { immediate: true })
+watch(() => [props.connection, props.object.bucket, props.object.key, props.object.versionId], () => {
+  choosingAccess.value = false
+  void load()
+}, { immediate: true })
 onUnmounted(() => {
   request++
   clear()
@@ -62,14 +69,24 @@ function mediaUnavailable(): void {
   error.value = 'This media could not be played or displayed. Download the object to open it on your device.'
 }
 
-async function load(): Promise<void> {
+function readWithOptions(access: TransferAccess): void {
+  choosingAccess.value = false
+  void load(access)
+}
+
+async function load(access?: TransferAccess): Promise<void> {
   const id = ++request
   busy.value = true
   error.value = ''
   clear()
   try {
-    const preview = await objectsApi.preview(props.connection, props.object)
-    if (id === request) display(preview)
+    const preview = await (access
+      ? objectsApi.preview(props.connection, props.object, access)
+      : objectsApi.preview(props.connection, props.object))
+    if (id === request) {
+      if (access?.customerKey) emit('protected')
+      display(preview)
+    }
   } catch (failure) {
     if (id === request) error.value = errorMessage(failure)
   } finally {
@@ -79,7 +96,12 @@ async function load(): Promise<void> {
 </script>
 
 <template>
-  <p class="preview-limits muted">Preview limits: 50 MiB per object, 64 KiB of text.</p>
+  <div class="preview-controls">
+    <p class="muted">Preview limits: 50 MiB per object, 64 KiB of text.</p>
+    <button v-if="connection !== 'demo'" class="subtle" :disabled="busy" @click="choosingAccess = true"><KeyRound :size="14" /> Read with options</button>
+  </div>
+  <TransferAccessModal v-if="choosingAccess" operation="read" :target="object.key"
+    @close="choosingAccess = false" :perform="readWithOptions" />
   <Notice v-if="error" tone="error">{{ error }}</Notice>
   <p v-else-if="busy" class="loading-line" role="status">Loading preview…</p>
   <PdfPreview v-else-if="pdf" :data="pdf" />
@@ -105,7 +127,7 @@ async function load(): Promise<void> {
 </template>
 
 <style scoped>
-.preview-limits { margin-bottom: 9px; font-size: 12.5px; }
+.preview-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 5px 8px; margin-bottom: 9px; font-size: 12.5px; }
 .preview-text { display: grid; gap: 6px; }
 .preview-text label { display: grid; gap: 4px; }
 .preview-text button { justify-self: start; }

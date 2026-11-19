@@ -14,6 +14,8 @@ import { workspaceAvailable } from '../../connection/model/workspace'
 import BrowserBatchMaintenance from '../../transfer/components/BrowserBatchMaintenance.vue'
 import BrowserBulkAttributesModal from '../../transfer/components/BrowserBulkAttributesModal.vue'
 import BrowserTransferQueue from '../../transfer/components/BrowserTransferQueue.vue'
+import TransferAccessModal from '../../transfer/components/TransferAccessModal.vue'
+import type { TransferAccess } from '../../transfer/model/access'
 import type { BulkAttributes, VersionPlanItem, VersionRule } from '../../transfer/model/batch'
 import type { Transfer } from '../../transfer/model/transfer'
 import { useConnections } from '../../connection/store/connections'
@@ -46,6 +48,13 @@ const connections = useConnections()
 const { tab, filter } = storeToRefs(browser)
 const folder = ref(false)
 const attributes = ref(false)
+const secureTransfer = ref<{ kind: 'upload' | 'download'; target: Location; objects: ObjectId[] }>()
+const secureTarget = computed(() => {
+  const transfer = secureTransfer.value
+  if (!transfer) return ''
+  if (transfer.kind === 'download' && transfer.objects.length === 1) return transfer.objects[0]?.key ?? ''
+  return 's3://' + transfer.target.bucket + '/' + transfer.target.prefix
+})
 const maintenance = ref(false)
 const selectedFolders = ref<string[]>([])
 const operationIds = ref<string[]>([])
@@ -116,6 +125,7 @@ watch(() => connections.contextKey, () => {
   pasteReview.value = false
 }, { flush: 'sync' })
 watch(listingLocation, () => {
+  secureTransfer.value = undefined
   selectedFolders.value = []
   attributes.value = false
   maintenance.value = false
@@ -485,6 +495,22 @@ function selectedStage(move: boolean): void {
   clearSelection()
 }
 
+function chooseSecureTransfer(kind: 'upload' | 'download', objects: ObjectId[] = []): void {
+  secureTransfer.value = { kind, target: { ...browser.location }, objects }
+}
+
+function chooseSecureObjectDownload(object: ObjectId): void {
+  chooseSecureTransfer('download', [object])
+}
+
+async function startSecureTransfer(access: TransferAccess): Promise<void> {
+  const transfer = secureTransfer.value
+  secureTransfer.value = undefined
+  if (!transfer) return
+  if (transfer.kind === 'upload') await upload(transfer.target, access)
+  else await download(transfer.target.connection, transfer.objects, access)
+}
+
 function archiveSelection(): void {
   void archive(selectionSource(browser.selectedObjects), browser.selectedObjects, selectedFolders.value)
 }
@@ -547,6 +573,9 @@ async function copyPath(): Promise<void> {
                       <summary class="icon-button" title="More list actions" aria-label="More list actions"><Ellipsis :size="18" /></summary>
                       <div class="pop-menu">
                         <button @click="copyPath">Copy S3 path</button>
+                        <button :disabled="readonly" @click="chooseSecureTransfer('upload')">Upload with options</button>
+                        <button :disabled="readonly || !browser.selected.length || !!selectedFolders.length"
+                          @click="chooseSecureTransfer('download', browser.selectedObjects)">Download selected with options</button>
                         <button :disabled="readonly" @click="failure = ''; maintenance = true">Prefix operations</button>
                         <button @click="pathDetails = !pathDetails">{{ pathDetails ? 'Hide path details' : 'Show path details' }}</button>
                         <button v-if="!embedded" :disabled="readonly || !managerAvailable" @click="emit('tools')">Prefix metrics and tools</button>
@@ -631,7 +660,7 @@ async function copyPath(): Promise<void> {
           <ObjectInspector v-if="browser.focus && tab !== 'Settings'" ref="inspector" :connection="browser.location.connection" :revision="browser.revision"
             :object="browser.focus" :deleted="browser.focus.deleted" :initial-tab="browser.focus.initialTab" :demo="demo"
             :metadata-drafts="browser.metadataDrafts" :tag-drafts="browser.tagDrafts" :has-previous="!!previousObject" :has-next="!!nextObject"
-            @close="closeInspector" @move="moveObject" @download="download(browser.location.connection, [$event])" @changed="objectChanged"
+            @close="closeInspector" @move="moveObject" @download="download(browser.location.connection, [$event])" @secure-download="chooseSecureObjectDownload" @changed="objectChanged"
             @version-changed="versionChanged" @remove="beginDelete([$event])" @metadata-draft="saveMetadataDraft" @tag-draft="saveTagDraft" />
         </FadeRegion>
       </div>
@@ -659,6 +688,8 @@ async function copyPath(): Promise<void> {
     <ObjectRowMenu v-if="rowMenu" v-bind="rowMenu" :demo="demo" @close="closeRowMenu" @open="openMenuRow" @download="downloadMenuRow" @copy="copyMenuRow" @stage="stageMenuRow" @rename="renameMenuRow" />
 
     <FolderDialog v-if="folder" :location="browser.location" @close="folder = false" @created="folder = false; browser.loadRows()" />
+    <TransferAccessModal v-if="secureTransfer" :operation="secureTransfer.kind" :target="secureTarget"
+      @close="secureTransfer = undefined" :perform="startSecureTransfer" />
     <BrowserBulkAttributesModal v-if="attributes" :objects="browser.selected.length" :folders="selectedFolders.length"
       :busy="submitting" :path="'s3://' + browser.bucket + '/' + selectionSource(browser.selectedObjects).prefix"
       :error="failure" @close="attributes = false" @apply="setAttributes" />

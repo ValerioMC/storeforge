@@ -4,4 +4,6 @@ pub(crate) mod files;
 pub(crate) mod inventory;
 pub mod model;
 pub mod repository;
+pub(crate) mod security;
+pub(crate) mod sts;
 pub mod service;

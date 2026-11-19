@@ -4,7 +4,13 @@ use tauri::State;
 use uuid::Uuid;
 
 use crate::{
-    audit::service::AuditService, common::error::Result, connection::service::ConnectionService,
+    audit::service::AuditService,
+    common::error::Result,
+    connection::service::ConnectionService,
+    transfer::{
+        security::{AccessInput, OperationAccess},
+        sts::RoleScope,
+    },
 };
 
 use super::{
@@ -48,8 +54,14 @@ pub async fn object_details(
     connections: State<'_, Arc<ConnectionService>>,
     connection: Uuid,
     object: ObjectId,
+    access: Option<AccessInput>,
 ) -> Result<ObjectDetails> {
-    ObjectService::details(&connections.session(connection)?.s3, &object).await
+    let access = OperationAccess::parse(access.unwrap_or_default(), false)?;
+    let session = connections.session(connection)?;
+    let client = access
+        .client(&session, RoleScope::Read(std::slice::from_ref(&object)))
+        .await?;
+    ObjectService::details(client.client()?, &object, access.read_access()).await
 }
 
 #[tauri::command]
@@ -75,8 +87,14 @@ pub async fn preview_object(
     connections: State<'_, Arc<ConnectionService>>,
     connection: Uuid,
     object: ObjectId,
+    access: Option<AccessInput>,
 ) -> Result<Preview> {
-    ObjectService::preview(&connections.session(connection)?.s3, &object).await
+    let access = OperationAccess::parse(access.unwrap_or_default(), false)?;
+    let session = connections.session(connection)?;
+    let client = access
+        .client(&session, RoleScope::Read(std::slice::from_ref(&object)))
+        .await?;
+    ObjectService::preview(client.client()?, &object, access.read_access()).await
 }
 
 #[tauri::command]

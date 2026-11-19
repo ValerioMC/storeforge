@@ -3,11 +3,12 @@ import { desktop, isTauri } from '../../../common/tauri'
 import type { Location, ObjectVersion } from '../../browser/model/objects'
 import type { Comparison, Integrity, Job, Transfer, Usage } from '../model/transfer'
 
+import type { TransferAccess } from '../model/access'
 import type { VersionPlanItem, VersionRule } from '../model/batch'
 
 export const transfersApi = {
   jobs: () => isTauri() ? desktop<Job[]>('list_jobs') : Promise.resolve([]),
-  start: (transfer: Transfer) => desktop<string>('start_transfer', { transfer }),
+  start: (transfer: Transfer, access?: TransferAccess) => desktop<string>('start_transfer', { transfer, access }),
   cancel: (id: string) => desktop<void>('cancel_job', { id }),
   compare: (source: Location, target: Location) => desktop<Comparison>('compare_locations', { source, target }),
   usage: (location: Location, includeVersions: boolean) => desktop<Usage>('location_usage', { location, includeVersions }),

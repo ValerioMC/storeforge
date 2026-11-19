@@ -2,6 +2,7 @@ import { ref, shallowRef } from 'vue'
 import { errorMessage } from '../../../common/tauri'
 import { transfersApi } from '../../transfer/api/transfers'
 import { useJobs } from '../../transfer/store/jobs'
+import type { TransferAccess } from '../../transfer/model/access'
 import type { Transfer } from '../../transfer/model/transfer'
 import type { Location, ObjectId } from '../model/objects'
 
@@ -30,16 +31,17 @@ export function useObjectActions(onJob: (id: string) => void) {
     }
   }
 
-  async function enqueue(transfer: Transfer): Promise<void> {
-    const id = await jobs.start(transfer)
+  async function enqueue(transfer: Transfer, access?: TransferAccess): Promise<void> {
+    const id = access ? await transfersApi.start(transfer, access) : await jobs.start(transfer)
+    if (access) await jobs.load()
     onJob(id)
     notice.value = 'Operation started.'
   }
 
-  async function upload(target: Location): Promise<void> {
+  async function upload(target: Location, access?: TransferAccess): Promise<void> {
     await run(async () => {
       const paths = await transfersApi.chooseFiles()
-      if (paths?.length) await enqueue({ kind: 'upload', target, paths, overwrite: false })
+      if (paths?.length) await enqueue({ kind: 'upload', target, paths, overwrite: false }, access)
     })
   }
 
@@ -47,17 +49,17 @@ export function useObjectActions(onJob: (id: string) => void) {
     if (paths.length) await run(() => enqueue({ kind: 'upload', target, paths, overwrite: false }))
   }
 
-  async function download(connection: string, objects: ObjectId[]): Promise<void> {
+  async function download(connection: string, objects: ObjectId[], access?: TransferAccess): Promise<void> {
     await run(async () => {
       if (objects.length > 1) {
         const target = await transfersApi.chooseDirectory()
-        if (target) await enqueue({ kind: 'download', connection, objects, target, directory: true })
+        if (target) await enqueue({ kind: 'download', connection, objects, target, directory: true }, access)
       } else {
         const object = objects[0]
         if (!object) return
         const basename = object.key.split('/').at(-1) || 'download'
         const target = await transfersApi.saveFile(basename.replace(/[\\:*?"<>|]/g, '_'))
-        if (target) await enqueue({ kind: 'download', connection, objects, target, directory: false })
+        if (target) await enqueue({ kind: 'download', connection, objects, target, directory: false }, access)
       }
     })
   }

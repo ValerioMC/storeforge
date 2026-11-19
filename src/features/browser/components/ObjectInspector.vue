@@ -6,6 +6,8 @@ import { errorMessage } from '../../../common/tauri'
 import FadeRegion from '../../../components/ui/FadeRegion.vue'
 import Modal from '../../../components/ui/Modal.vue'
 import Notice from '../../../components/ui/Notice.vue'
+import TransferAccessModal from '../../transfer/components/TransferAccessModal.vue'
+import type { TransferAccess } from '../../transfer/model/access'
 import { objectsApi } from '../api/objects'
 import type { VerifiedVersion } from '../api/versions'
 import { inspectorObjectKey, inspectorTabs, metadataHeaders, metadataMatches, metadataUpdate, readMetadataDraft, tagsMatch, type InspectorTab, type MetadataDraft } from '../model/inspector'
@@ -21,7 +23,7 @@ const props = defineProps<{
   metadataDrafts?: ReadonlyMap<string, MetadataDraft>; tagDrafts?: ReadonlyMap<string, Tag[]>;
 }>()
 const emit = defineEmits<{
-  close: []; move: [direction: -1 | 1]; download: [object: ObjectId]; changed: []; remove: [object: ObjectId];
+  close: []; move: [direction: -1 | 1]; download: [object: ObjectId]; secureDownload: [object: ObjectId]; changed: []; remove: [object: ObjectId];
   versionChanged: [state: VerifiedVersion];
   metadataDraft: [key: string, draft: MetadataDraft | undefined]; tagDraft: [key: string, draft: Tag[] | undefined];
 }>()
@@ -44,6 +46,8 @@ const pendingExit = ref<() => void>()
 const minutes = ref(30)
 const share = ref<{ url: string; expiresAt: string }>()
 const more = ref(false)
+const choosingAccess = ref(false)
+const customerProtected = ref(false)
 const closeButton = ref<HTMLButtonElement>()
 let generation = 0
 
@@ -76,6 +80,8 @@ watch(() => [props.connection, props.revision, props.object.bucket, props.object
 watch(targetKey, key => {
   generation++
   more.value = false
+  choosingAccess.value = false
+  customerProtected.value = false
   share.value = undefined
   copied.value = ''
   error.value = ''
@@ -145,14 +151,29 @@ function backToObject(): void {
   })
 }
 
-async function loadDetails(): Promise<void> {
+function readDetailsWithOptions(access: TransferAccess): void {
+  choosingAccess.value = false
+  void loadDetails(access)
+}
+
+function markCustomerProtected(): void {
+  customerProtected.value = true
+  share.value = undefined
+}
+
+async function loadDetails(access?: TransferAccess): Promise<void> {
   if (busy.value) return
   const id = generation
   busy.value = true
   detailsError.value = ''
   try {
-    const result = await objectsApi.details(props.connection, target.value)
-    if (id === generation) details.value = result
+    const result = await (access
+      ? objectsApi.details(props.connection, target.value, access)
+      : objectsApi.details(props.connection, target.value))
+    if (id === generation) {
+      details.value = result
+      if (result.encryption === 'SSE-C' || access?.customerKey) markCustomerProtected()
+    }
   } catch (failure) {
     if (id === generation) detailsError.value = errorMessage(failure)
   } finally {
@@ -186,6 +207,7 @@ async function copy(value: string, message: string): Promise<void> {
 }
 
 async function generateUrl(): Promise<void> {
+  if (customerProtected.value) return
   const expiry = minutes.value
   if (!Number.isInteger(expiry) || expiry < 1 || expiry > 10_080) {
     error.value = 'Enter an expiry between 1 minute and 7 days.'
@@ -314,8 +336,10 @@ function accessChanged(state: ObjectDetails | undefined): void {
         <button v-if="version" class="subtle back-to-version" @click="backToObject">Back to object versions</button>
         <FadeRegion>
           <div v-if="more" class="panel-form object-more">
-            <label>Signed URL expiry (minutes)<input v-model.number="minutes" type="number" min="1" max="10080" :disabled="demo || deleted" /></label>
-            <button :disabled="demo || deleted || signing" @click="generateUrl"><Link2 :size="16" /> Generate signed URL</button>
+            <button :disabled="demo || deleted" @click="emit('secureDownload', target)">Download with options</button>
+            <label v-if="!customerProtected">Signed URL expiry (minutes)<input v-model.number="minutes" type="number" min="1" max="10080" :disabled="demo || deleted" /></label>
+            <button v-if="!customerProtected" :disabled="demo || deleted || signing" @click="generateUrl"><Link2 :size="16" /> Generate signed URL</button>
+            <p v-if="customerProtected" class="muted">Customer-key objects require the key when downloaded.</p>
             <label v-if="share">Signed URL<input :value="share.url" readonly @focus="($event.target as HTMLInputElement).select()" /></label>
             <p v-if="share" class="muted">Expires {{ formatDate(share.expiresAt, true) }}</p>
             <button v-if="share" @click="copy(share.url, 'Signed URL copied.')">Copy signed URL</button>
@@ -327,7 +351,7 @@ function accessChanged(state: ObjectDetails | undefined): void {
       <Notice v-if="copied" tone="success">{{ copied }}</Notice>
       <FadeRegion>
         <div :key="inspectorView">
-          <ObjectPreview v-if="tab === 'Preview'" :connection="connection" :object="target" />
+          <ObjectPreview v-if="tab === 'Preview'" :connection="connection" :object="target" @protected="markCustomerProtected" />
           <template v-else-if="tab === 'Details'">
             <figure class="document-tile">
               <div class="document-glyph"><FileText :size="38" :stroke-width="1.25" /></div>
@@ -335,7 +359,10 @@ function accessChanged(state: ObjectDetails | undefined): void {
             </figure>
             <p v-if="busy" class="loading-line" role="status">Reading object details…</p>
             <Notice v-if="detailsError" tone="error">{{ detailsError }}</Notice>
-            <button v-if="detailsError" class="subtle" @click="loadDetails">Retry details</button>
+            <button v-if="detailsError" class="subtle" @click="loadDetails()">Retry details</button>
+            <button v-if="!demo" class="subtle" :disabled="busy" @click="choosingAccess = true">Read details with options</button>
+            <TransferAccessModal v-if="choosingAccess" operation="read" :target="target.key"
+              @close="choosingAccess = false" :perform="readDetailsWithOptions" />
             <dl class="object-properties">
               <div><dt>Object key</dt><dd><code>{{ target.key }}</code></dd></div>
               <div v-if="details"><dt>Size</dt><dd>{{ formatSize(details.size) }}</dd></div>
@@ -372,7 +399,7 @@ function accessChanged(state: ObjectDetails | undefined): void {
           </template>
           <template v-else-if="tab === 'Access'">
             <Notice v-if="detailsError" tone="error">{{ detailsError }}</Notice>
-            <button class="subtle" :disabled="busy" @click="loadDetails">{{ busy ? 'Reading details…' : 'Refresh details' }}</button>
+            <button class="subtle" :disabled="busy" @click="loadDetails()">{{ busy ? 'Reading details…' : 'Refresh details' }}</button>
             <ObjectAccess :connection="connection" :object="target" :details="details" :demo="demo" @changed="accessChanged" />
           </template>
         </div>

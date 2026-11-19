@@ -14,8 +14,12 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use zip::{ZipWriter, write::SimpleFileOptions};
 
 use crate::{
-    common::error::{AppError, Result, storage_error},
+    common::error::{AppError, Result},
     object::{model::ObjectId, repository},
+};
+
+use super::security::{
+    ReadAccess, UploadAccess, UploadEncryption, customer_headers, transfer_error, write_client,
 };
 
 const MULTIPART_THRESHOLD: u64 = 64 * 1024 * 1024;
@@ -23,7 +27,7 @@ const PART_BYTES: u64 = 32 * 1024 * 1024;
 const MAX_PARTS: u64 = 10_000;
 
 #[derive(Default)]
-pub struct UploadOptions {
+pub struct UploadOptions<'a> {
     pub content_type: String,
     pub overwrite: bool,
     pub metadata: Option<HashMap<String, String>>,
@@ -31,6 +35,7 @@ pub struct UploadOptions {
     pub content_disposition: Option<String>,
     pub content_encoding: Option<String>,
     pub content_language: Option<String>,
+    pub access: UploadAccess<'a>,
 }
 
 pub struct UploadReceipt {
@@ -43,7 +48,7 @@ pub async fn upload(
     bucket: &str,
     key: &str,
     path: &Path,
-    options: UploadOptions,
+    options: UploadOptions<'_>,
 ) -> Result<UploadReceipt> {
     upload_observed(client, bucket, key, path, options, &|_| Ok(())).await
 }
@@ -53,23 +58,24 @@ pub async fn upload_observed(
     bucket: &str,
     key: &str,
     path: &Path,
-    options: UploadOptions,
+    options: UploadOptions<'_>,
     observe: &(impl Fn(u64) -> Result<()> + Sync),
 ) -> Result<UploadReceipt> {
     let info = tokio::fs::metadata(path).await?;
     if !info.is_file() {
         return Err(AppError::Invalid("Select regular files to upload.".into()));
     }
-    if !options.overwrite {
+    if !options.overwrite && !options.access.sensitive() {
         repository::ensure_absent(client, bucket, key).await?;
     }
+    let client = write_client(client);
     if info.len() >= MULTIPART_THRESHOLD {
-        return multipart_upload(client, bucket, key, path, info.len(), options, observe).await;
+        return multipart_upload(&client, bucket, key, path, info.len(), options, observe).await;
     }
     let body = ByteStream::from_path(path)
         .await
         .map_err(|error| AppError::File(error.to_string()))?;
-    let uploaded = client
+    let put = client
         .put_object()
         .bucket(bucket)
         .key(key)
@@ -79,11 +85,20 @@ pub async fn upload_observed(
         .set_content_disposition(options.content_disposition)
         .set_content_encoding(options.content_encoding)
         .set_content_language(options.content_language)
+        .set_server_side_encryption(options.access.encryption.map(UploadEncryption::algorithm))
+        .set_ssekms_key_id(
+            options
+                .access
+                .encryption
+                .and_then(UploadEncryption::key_id)
+                .map(str::to_owned),
+        )
         .set_if_none_match((!options.overwrite).then(|| "*".into()))
-        .body(body)
+        .body(body);
+    let uploaded = customer_headers!(put, options.access.customer)
         .send()
         .await
-        .map_err(storage_error)?;
+        .map_err(|error| transfer_error(error, options.access.sensitive(), true))?;
     Ok(UploadReceipt {
         etag: uploaded.e_tag,
         version_id: uploaded.version_id,
@@ -96,10 +111,10 @@ async fn multipart_upload(
     key: &str,
     path: &Path,
     size: u64,
-    options: UploadOptions,
+    options: UploadOptions<'_>,
     observe: &(impl Fn(u64) -> Result<()> + Sync),
 ) -> Result<UploadReceipt> {
-    let started = client
+    let create = client
         .create_multipart_upload()
         .bucket(bucket)
         .key(key)
@@ -109,9 +124,18 @@ async fn multipart_upload(
         .set_content_disposition(options.content_disposition)
         .set_content_encoding(options.content_encoding)
         .set_content_language(options.content_language)
+        .set_server_side_encryption(options.access.encryption.map(UploadEncryption::algorithm))
+        .set_ssekms_key_id(
+            options
+                .access
+                .encryption
+                .and_then(UploadEncryption::key_id)
+                .map(str::to_owned),
+        );
+    let started = customer_headers!(create, options.access.customer)
         .send()
         .await
-        .map_err(storage_error)?;
+        .map_err(|error| transfer_error(error, options.access.sensitive(), true))?;
     let upload_id = repository::required_id(started.upload_id(), "multipart upload")?;
     let result = upload_parts(
         client,
@@ -119,11 +143,13 @@ async fn multipart_upload(
         path,
         size,
         &upload_id,
-        options.overwrite,
+        (options.overwrite, options.access),
         observe,
     )
     .await;
-    if result.is_err()
+    if result
+        .as_ref()
+        .is_err_and(|error| !matches!(error, AppError::AmbiguousWrite(_)))
         && let Err(error) = client
             .abort_multipart_upload()
             .bucket(bucket)
@@ -132,6 +158,7 @@ async fn multipart_upload(
             .send()
             .await
     {
+        let error = transfer_error(error, options.access.sensitive(), true);
         tracing::warn!(%error, "Could not abort a failed multipart upload");
     }
     result
@@ -143,7 +170,7 @@ async fn upload_parts(
     path: &Path,
     size: u64,
     upload_id: &str,
-    overwrite: bool,
+    (overwrite, access): (bool, UploadAccess<'_>),
     observe: &(impl Fn(u64) -> Result<()> + Sync),
 ) -> Result<UploadReceipt> {
     let part_bytes = PART_BYTES.max(size.div_ceil(MAX_PARTS));
@@ -159,16 +186,17 @@ async fn upload_parts(
             .await
             .map_err(|error| AppError::File(error.to_string()))?;
         let part_number = index as i32 + 1;
-        let response = client
+        let part = client
             .upload_part()
             .bucket(bucket)
             .key(key)
             .upload_id(upload_id)
             .part_number(part_number)
-            .body(body)
+            .body(body);
+        let response = customer_headers!(part, access.customer)
             .send()
             .await
-            .map_err(storage_error)?;
+            .map_err(|error| transfer_error(error, access.sensitive(), true))?;
         let etag = repository::required_id(response.e_tag(), "part ETag")?;
         observe(offset + part_bytes.min(size - offset))?;
         parts.push(
@@ -178,10 +206,10 @@ async fn upload_parts(
                 .build(),
         );
     }
-    if !overwrite {
+    if !overwrite && !access.sensitive() {
         repository::ensure_absent(client, bucket, key).await?;
     }
-    let uploaded = client
+    let complete = client
         .complete_multipart_upload()
         .bucket(bucket)
         .key(key)
@@ -191,10 +219,11 @@ async fn upload_parts(
             CompletedMultipartUpload::builder()
                 .set_parts(Some(parts))
                 .build(),
-        )
+        );
+    let uploaded = customer_headers!(complete, access.customer)
         .send()
         .await
-        .map_err(storage_error)?;
+        .map_err(|error| transfer_error(error, access.sensitive(), true))?;
     Ok(UploadReceipt {
         etag: uploaded.e_tag,
         version_id: uploaded.version_id,
@@ -206,13 +235,14 @@ pub async fn download(
     object: &ObjectId,
     path: &Path,
     replace: bool,
+    access: ReadAccess<'_>,
     observe: &(impl Fn(u64) -> Result<()> + Sync),
 ) -> Result<u64> {
     let directory = path
         .parent()
         .ok_or_else(|| AppError::Invalid("Choose a local destination.".into()))?;
     let mut temporary = NamedTempFile::new_in(directory)?;
-    let bytes = stream_to_file(client, object, &mut temporary, None, observe).await?;
+    let bytes = stream_to_file(client, object, &mut temporary, None, access, observe).await?;
     if replace {
         temporary.persist(path).map_err(|error| error.error)?;
     } else {
@@ -228,17 +258,19 @@ pub async fn stream_to_file(
     object: &ObjectId,
     file: &mut NamedTempFile,
     etag: Option<String>,
+    access: ReadAccess<'_>,
     observe: &(impl Fn(u64) -> Result<()> + Sync),
 ) -> Result<u64> {
-    let output = client
+    let get = client
         .get_object()
         .bucket(&object.bucket)
         .key(&object.key)
         .set_version_id(object.version_id.clone())
-        .set_if_match(etag)
+        .set_if_match(etag);
+    let output = customer_headers!(get, access.customer)
         .send()
         .await
-        .map_err(storage_error)?;
+        .map_err(|error| transfer_error(error, access.sensitive, false))?;
     let mut writer = tokio::fs::File::from_std(file.reopen()?);
     let mut reader = output.body.into_async_read();
     let mut buffer = vec![0; 64 * 1024];
@@ -382,3 +414,7 @@ pub fn download_target(target: &Path, directory: bool, object: &ObjectId) -> Res
     }
     Ok(target.to_owned())
 }
+
+#[cfg(test)]
+#[path = "../../tests/unit/transfer/files.rs"]
+mod tests;

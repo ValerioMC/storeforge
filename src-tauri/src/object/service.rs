@@ -13,7 +13,10 @@ use aws_sdk_s3::{
 };
 use base64::{Engine, engine::general_purpose::STANDARD};
 
-use crate::common::error::{AppError, Result, storage_error};
+use crate::{
+    common::error::{AppError, Result, storage_error},
+    transfer::security::{ReadAccess, customer_headers, transfer_error},
+};
 
 use super::{
     model::{
@@ -29,8 +32,12 @@ const TEXT_PREVIEW_LIMIT: i64 = 64 * 1024;
 pub struct ObjectService;
 
 impl ObjectService {
-    pub async fn details(client: &Client, object: &ObjectId) -> Result<ObjectDetails> {
-        let head = repository::head(client, object).await?;
+    pub(crate) async fn details(
+        client: &Client,
+        object: &ObjectId,
+        access: ReadAccess<'_>,
+    ) -> Result<ObjectDetails> {
+        let head = repository::head_with_access(client, object, access).await?;
         Ok(ObjectDetails {
             content_type: head.content_type,
             size: head.content_length,
@@ -45,7 +52,11 @@ impl ObjectService {
             legal_hold: head
                 .object_lock_legal_hold_status
                 .map(|value| value.to_string()),
-            encryption: head.server_side_encryption.map(|value| value.to_string()),
+            encryption: head
+                .sse_customer_algorithm
+                .map(|_| "SSE-C".into())
+                .or_else(|| access.customer.is_some().then(|| "SSE-C".into()))
+                .or_else(|| head.server_side_encryption.map(|value| value.to_string())),
             restore: head.restore,
             cache_control: head.cache_control,
             content_disposition: head.content_disposition,
@@ -75,8 +86,12 @@ impl ObjectService {
             .collect())
     }
 
-    pub async fn preview(client: &Client, object: &ObjectId) -> Result<Preview> {
-        let head = repository::head(client, object).await?;
+    pub(crate) async fn preview(
+        client: &Client,
+        object: &ObjectId,
+        access: ReadAccess<'_>,
+    ) -> Result<Preview> {
+        let head = repository::head_with_access(client, object, access).await?;
         let size = head
             .content_length()
             .filter(|size| *size >= 0)
@@ -92,7 +107,8 @@ impl ObjectService {
         } else {
             let length = if truncated { TEXT_PREVIEW_LIMIT } else { size };
             let range = truncated.then(|| format!("bytes=0-{}", length - 1));
-            let bytes = read_preview(client, object, head.e_tag, range, length as usize).await?;
+            let bytes =
+                read_preview(client, object, head.e_tag, range, length as usize, access).await?;
             STANDARD.encode(bytes)
         };
         Ok(Preview {
@@ -110,13 +126,21 @@ impl ObjectService {
                 "Expiry must be between 1 minute and 7 days.".into(),
             ));
         }
+        let head = match repository::head(client, object).await {
+            Ok(head) if head.sse_customer_algorithm.is_none() => head,
+            Err(error @ AppError::Missing(_)) => return Err(error),
+            _ => return Err(AppError::Invalid(
+                "The endpoint could not confirm this object can be shared without a customer key."
+                    .into(),
+            )),
+        };
         let config = PresigningConfig::expires_in(Duration::from_secs(u64::from(minutes) * 60))
             .map_err(|error| AppError::Invalid(error.to_string()))?;
         let request = client
             .get_object()
             .bucket(&object.bucket)
             .key(&object.key)
-            .set_version_id(object.version_id.clone())
+            .set_version_id(object.version_id.clone().or(head.version_id))
             .presigned(config)
             .await
             .map_err(storage_error)?;
@@ -304,18 +328,20 @@ async fn read_preview(
     etag: Option<String>,
     range: Option<String>,
     length: usize,
+    access: ReadAccess<'_>,
 ) -> Result<Vec<u8>> {
     let ranged = range.is_some();
-    let mut output = client
+    let get = client
         .get_object()
         .bucket(&object.bucket)
         .key(&object.key)
         .set_version_id(object.version_id.clone())
         .set_if_match(etag)
-        .set_range(range)
+        .set_range(range);
+    let mut output = customer_headers!(get, access.customer)
         .send()
         .await
-        .map_err(storage_error)?;
+        .map_err(|error| transfer_error(error, access.sensitive, false))?;
     let mut bytes = Vec::with_capacity(length);
     while let Some(chunk) = output
         .body

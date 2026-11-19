@@ -69,14 +69,24 @@ pub async fn list(client: &Client, query: &ObjectQuery) -> Result<ObjectPage> {
 }
 
 pub async fn head(client: &Client, object: &ObjectId) -> Result<HeadObjectOutput> {
-    client
+    head_with_access(client, object, Default::default()).await
+}
+
+pub(crate) async fn head_with_access(
+    client: &Client,
+    object: &ObjectId,
+    access: crate::transfer::security::ReadAccess<'_>,
+) -> Result<HeadObjectOutput> {
+    use crate::transfer::security::{customer_headers, transfer_error};
+    let head = client
         .head_object()
         .bucket(&object.bucket)
         .key(&object.key)
-        .set_version_id(object.version_id.clone())
+        .set_version_id(object.version_id.clone());
+    customer_headers!(head, access.customer)
         .send()
         .await
-        .map_err(storage_error)
+        .map_err(|error| transfer_error(error, access.sensitive, false))
 }
 
 pub async fn ensure_absent(client: &Client, bucket: &str, key: &str) -> Result<()> {
