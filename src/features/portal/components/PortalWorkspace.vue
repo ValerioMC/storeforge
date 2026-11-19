@@ -14,7 +14,10 @@ import { portalPages, type PortalLocation, type PortalPage } from '../model/navi
 import type { PortalProject, PortalScope } from '../model/spaces'
 import PortalCollaborators from './PortalCollaborators.vue'
 import PortalKeys from './PortalKeys.vue'
-import PortalMembershipRequests from './PortalMembershipRequests.vue'
+import PortalRequests from './PortalRequests.vue'
+import PortalHistory from './PortalHistory.vue'
+import PortalProjectSettings from './PortalProjectSettings.vue'
+import PortalUsage from './PortalUsage.vue'
 import PortalDashboard from './PortalDashboard.vue'
 import PortalSpaces from './PortalSpaces.vue'
 
@@ -27,6 +30,7 @@ const revision = ref(0)
 const tabs = (Object.keys(portalPages) as PortalPage[]).map(value => ({ value, label: portalPages[value] }))
 const projectOptions = computed(() => (projects.data.value ?? []).map(project => ({ value: String(project.id), label: project.name })))
 const project = computed(() => projects.data.value?.find(project => project.id === props.location.projectId))
+const manager = computed(() => project.value?.portal_role === 'portal_manager')
 const eligible = computed(() => !!profile.value?.session?.access.portal.available)
 const scope = computed<PortalScope | undefined>(() => eligible.value && project.value && serviceId.value === props.location.serviceId
   ? { id: serviceId.value, project: project.value.id } : undefined)
@@ -105,9 +109,13 @@ function openSpace(spaceId: string): void {
         <Notice v-else-if="!scope">{{ location.projectId ? 'This project is unavailable on the selected service.' : 'No Portal projects are assigned to this account.' }}</Notice>
         <PortalDashboard v-else-if="location.page === 'overview'" :scope="scope" :project="project!" @open="openSpace" @spaces="selectPage('spaces')" />
         <PortalCollaborators v-else-if="location.page === 'collaborators'" :scope="scope" :person="location.personId"
-          :manager="project?.portal_role === 'portal_manager'" @person="openPerson" @space="openSpace" @requests="selectPage('requests')" />
+          :manager="manager" @person="openPerson" @space="openSpace" @requests="selectPage('requests')" />
         <PortalKeys v-else-if="location.page === 'keys'" :scope="scope" />
-        <PortalMembershipRequests v-else-if="location.page === 'requests'" :scope="scope" />
+        <PortalRequests v-else-if="location.page === 'requests'" :id="scope.id" :scope="scope" :manager="manager"
+          @collaborators="selectPage('collaborators')" @settings="selectPage('settings')" />
+        <PortalUsage v-else-if="location.page === 'usage'" :scope="scope" :project="project!" @space="openSpace" @spaces="selectPage('spaces')" />
+        <PortalHistory v-else-if="location.page === 'history'" :scope="scope" :manager="manager" />
+        <PortalProjectSettings v-else-if="location.page === 'settings'" :scope="scope" :manager="manager" @requests="selectPage('requests')" />
         <PortalSpaces v-else :scope="scope" :location="location" @navigate="emit('navigate', $event)" @open="openSpace" @spaces="selectPage('spaces')" />
       </div>
     </FadeRegion>

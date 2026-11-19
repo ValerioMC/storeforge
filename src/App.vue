@@ -13,6 +13,7 @@ import AdminWorkspace from './features/administration/components/AdminWorkspace.
 import CephMultisite from './features/administration/components/CephMultisite.vue'
 import WorkspaceSettings from './features/administration/components/WorkspaceSettings.vue'
 import PlatformGovernance from './features/administration/components/PlatformGovernance.vue'
+import PortalAdminRequests from './features/portal/components/PortalAdminRequests.vue'
 import PortalWorkspace from './features/portal/components/PortalWorkspace.vue'
 import { readPortalLocation, writePortalLocation } from './features/portal/model/navigation'
 import BrowserWorkspace from './features/browser/components/BrowserWorkspace.vue'
@@ -521,6 +522,8 @@ function showJob(id: string): void {
             <WorkspacePreferences v-else-if="route.workspace === 'admin' && route.page === 'preferences'" v-model:compact="compact" v-model:show-tags="showTags"
               v-model:startup="startup" :profiles="connections.profiles.filter(profile => !profile.settings?.openstack)" />
             <WorkspaceSettings v-else-if="route.workspace === 'admin' && route.page === 'settings'"
+              @connections="go({ workspace: 'admin', page: 'connections' })" />
+            <PortalAdminRequests v-else-if="route.workspace === 'admin' && route.page === 'portalRequests'"
               @connections="go({ workspace: 'admin', page: 'connections' })" />
             <PlatformGovernance v-else-if="route.workspace === 'admin' && route.page === 'governance'"
               @connections="go({ workspace: 'admin', page: 'connections' })" />

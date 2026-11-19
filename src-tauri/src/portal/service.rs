@@ -1,3 +1,5 @@
+#[path = "governance.rs"]
+pub(super) mod governance;
 #[path = "sharing.rs"]
 mod sharing;
 
@@ -214,6 +216,7 @@ impl<'a> ProjectSession<'a> {
 
     async fn read(&self, operation: PortalRead) -> Result<Value> {
         match operation {
+            PortalRead::Governance { view } => self.read_governance(view).await,
             PortalRead::Sharing { view } => self.read_sharing(view).await,
             PortalRead::Projects => Err(AppError::Invalid(
                 "Project catalog requests are unscoped.".into(),
@@ -319,6 +322,7 @@ impl<'a> ProjectSession<'a> {
 
     async fn change(&self, operation: PortalChange) -> Result<Value> {
         match operation {
+            PortalChange::Governance { action } => self.change_governance(action).await,
             PortalChange::Sharing { action } => self.change_sharing(action).await,
             PortalChange::Create { draft } => {
                 self.submit(Method::POST, "/api/portal/storage-spaces", &draft)

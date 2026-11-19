@@ -108,3 +108,33 @@ pub async fn export_portal_client(
     )
     .await
 }
+
+#[tauri::command]
+pub async fn read_portal_admin_requests(
+    service: State<'_, SharedService>,
+    id: Uuid,
+    query: super::model::AdminRequestQuery,
+) -> Result<Value> {
+    service::governance::admin_requests(&service, id, query).await
+}
+
+#[tauri::command]
+pub async fn respond_portal_request(
+    service: State<'_, SharedService>,
+    id: Uuid,
+    request: u64,
+    response: super::model::AdminResponse,
+) -> Result<Value> {
+    service::governance::respond(&service, id, request, response).await
+}
+
+#[tauri::command]
+pub async fn export_portal_access_logs(
+    service: State<'_, SharedService>,
+    id: Uuid,
+    project: u64,
+    query: super::model::LogExport,
+    destination: std::path::PathBuf,
+) -> Result<()> {
+    service::governance::export_logs(&service, id, project, query, destination).await
+}

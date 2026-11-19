@@ -6,7 +6,7 @@ import { executionContext, identityAvailable, type Connection } from './connecti
 export type DesktopWorkspace = 'browser' | 'manager' | 'cephAdmin' | 'storageOps' | 'admin' | 'portal'
 export type ManagerPage = 'overview' | 'buckets' | 'featureRules' | 'access' | 'tools' | 'metrics' | 'activity'
 export type CephPage = 'overview' | 'buckets' | 'resources' | 'metrics' | 'health' | 'multisite'
-export type AdminPage = 'overview' | 'connections' | 'preferences' | 'activity' | 'metrics' | 'health' | 'rgwIdentities' | 'costs' | 'governance' | 'settings'
+export type AdminPage = 'overview' | 'connections' | 'preferences' | 'activity' | 'metrics' | 'health' | 'rgwIdentities' | 'costs' | 'governance' | 'settings' | 'portalRequests'
 export type MetricPage = 'usage' | 'history' | 'traffic' | 'cost'
 export type CephGroup = 'Ceph accounts' | 'Ceph users' | 'Ceph buckets'
 export type WorkspaceDestination =
@@ -29,7 +29,7 @@ const cephPages: Record<CephPage, string> = {
 }
 export const adminPages: Record<AdminPage, string> = {
   overview: 'Overview', metrics: 'Usage & metrics', health: 'Endpoint health', connections: 'Connections', preferences: 'Preferences', activity: 'Activity',
-  rgwIdentities: 'Managed RGW identities', costs: 'Storage costs', governance: 'Platform governance', settings: 'Workspace settings',
+  rgwIdentities: 'Managed RGW identities', costs: 'Storage costs', governance: 'Platform governance', settings: 'Workspace settings', portalRequests: 'Portal requests',
 }
 
 export function workspaceAvailable(profile: Connection | undefined, workspace: DesktopWorkspace): boolean {

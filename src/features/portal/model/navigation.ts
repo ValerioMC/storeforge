@@ -4,6 +4,9 @@ export const portalPages = {
   collaborators: 'Collaborators',
   keys: 'Access keys',
   requests: 'Requests',
+  usage: 'Storage health',
+  history: 'History',
+  settings: 'Settings',
 } as const
 export type PortalPage = keyof typeof portalPages
 export type SpaceView = 'files' | 'trash' | 'statistics' | 'settings' | 'sharing'

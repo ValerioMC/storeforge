@@ -176,6 +176,13 @@ impl Request {
 }
 
 pub(super) fn serve(requests: Vec<Request>) -> (String, String, thread::JoinHandle<()>) {
+    serve_as(requests, false)
+}
+
+pub(super) fn serve_as(
+    requests: Vec<Request>,
+    admin: bool,
+) -> (String, String, thread::JoinHandle<()>) {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let origin = format!("http://{}", listener.local_addr().unwrap());
     let claims = json!({"typ":"api_access","exp":Utc::now().timestamp() + 300});
@@ -183,8 +190,29 @@ pub(super) fn serve(requests: Vec<Request>) -> (String, String, thread::JoinHand
     let expected = format!("authorization: Bearer {token}");
     let worker = thread::spawn(move || {
         let requests = [
-            Request::new("GET", "/api/users/me", 200, PRINCIPAL),
-            Request::new("GET", "/api/me/workspace-access", 200, ACCESS),
+            Request::new(
+                "GET",
+                "/api/users/me",
+                200,
+                if admin {
+                    PRINCIPAL.replace("ui_user", "ui_admin")
+                } else {
+                    PRINCIPAL.into()
+                },
+            ),
+            Request::new(
+                "GET",
+                "/api/me/workspace-access",
+                200,
+                if admin {
+                    ACCESS.replace(
+                        r#""admin":{"available":false,"context_count":0}"#,
+                        r#""admin":{"available":true,"context_count":1}"#,
+                    )
+                } else {
+                    ACCESS.into()
+                },
+            ),
         ]
         .into_iter()
         .chain(requests);

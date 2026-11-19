@@ -36,10 +36,10 @@ function filter(event: Event): void {
       </li>
     </ul>
     <p v-else-if="data" class="muted portal-note">No matching people.</p>
-    <div v-if="data && data.total_pages > 1" class="portal-inline">
+    <div v-if="data && (data.has_next || page > 1)" class="portal-inline">
       <button type="button" :disabled="page <= 1" @click="page--">Previous</button>
-      <span>{{ page }} / {{ data.total_pages }}</span>
-      <button type="button" :disabled="page >= data.total_pages" @click="page++">Next</button>
+      <span>Page {{ page }}</span>
+      <button type="button" :disabled="!data.has_next" @click="page++">Next</button>
     </div>
   </div>
 </template>

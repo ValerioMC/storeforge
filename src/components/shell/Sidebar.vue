@@ -33,6 +33,7 @@ const adminLinks = [
   { label: 'Storage costs', icon: Wallet, destination: { workspace: 'admin', page: 'costs' } },
   { label: 'Managed RGW identities', icon: Users, destination: { workspace: 'admin', page: 'rgwIdentities' } },
   { label: 'Platform governance', icon: ShieldCheck, destination: { workspace: 'admin', page: 'governance' } },
+  { label: 'Portal requests', icon: Users, destination: { workspace: 'admin', page: 'portalRequests' } },
   { label: 'Connections', icon: Cable, destination: { workspace: 'admin', page: 'connections' } },
   { label: 'Activity', icon: Activity, destination: { workspace: 'admin', page: 'activity' } },
   { label: 'Workspace settings', icon: SlidersHorizontal, destination: { workspace: 'admin', page: 'settings' } },

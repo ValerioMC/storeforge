@@ -212,7 +212,7 @@ export interface Page<T> {
   total: number
   page: number
   page_size: number
-  total_pages: number
+  has_next: boolean
 }
 
 export function spaceAccess(space: PortalSpace) {

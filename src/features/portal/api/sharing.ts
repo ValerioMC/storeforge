@@ -4,7 +4,7 @@ import type { GrantRole, PortalScope, ProjectRole, SpaceScope } from '../model/s
 import type { ClientExport } from '../model/client-export'
 
 type Read =
-  | { kind: 'collaborators' | 'requests' | 'access' | 'links' | 'keys' }
+  | { kind: 'collaborators' | 'access' | 'links' | 'keys' }
   | { kind: 'collaborator'; user_id: number }
 
 type Change =
@@ -30,7 +30,6 @@ function change<T>(scope: PortalScope | SpaceScope, action: Change): Promise<T> 
 }
 
 export const sharingApi = {
-  requests: (scope: PortalScope) => read<MembershipReceipt[]>(scope, { kind: 'requests' }),
   collaborators: (scope: PortalScope) => read<Collaborators>(scope, { kind: 'collaborators' }),
   collaborator: (scope: PortalScope, user_id: number) => read<CollaboratorReview>(scope, { kind: 'collaborator', user_id }),
   access: (scope: SpaceScope) => read<SpaceAccessSummary>(scope, { kind: 'access' }),

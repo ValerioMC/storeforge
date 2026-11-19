@@ -4,6 +4,9 @@ use serde::{Deserialize, Serialize};
 #[serde(tag = "kind", rename_all = "camelCase")]
 pub enum PortalRead {
     Projects,
+    Governance {
+        view: GovernanceRead,
+    },
     Sharing {
         view: SharingRead,
     },
@@ -42,6 +45,7 @@ pub enum PortalRead {
 #[derive(Deserialize)]
 #[serde(tag = "kind", rename_all = "camelCase")]
 pub enum PortalChange {
+    Governance { action: GovernanceChange },
     Sharing { action: SharingChange },
     Create { draft: SpaceCreate },
     Import { draft: SpaceImport },
@@ -287,4 +291,157 @@ pub struct KeyReceipt {
     #[serde(flatten)]
     pub key: AccessKey,
     pub secret_access_key: Option<String>,
+}
+
+#[derive(Deserialize, Serialize)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum GovernanceRead {
+    Settings,
+    History { space_id: Option<String> },
+    AccessLogs { query: AccessLogQuery },
+    Composition,
+    Traffic { window: TrafficWindow },
+    Cost { month: String },
+}
+
+#[derive(Deserialize, Serialize)]
+pub struct AccessLogQuery {
+    pub date: chrono::NaiveDate,
+    pub space_id: Option<String>,
+    pub offset: u64,
+    pub timezone_offset_minutes: i32,
+    pub filter: Option<AccessLogFilter>,
+}
+
+#[derive(Deserialize, Serialize)]
+pub struct AccessLogFilter {
+    pub field: AccessLogField,
+    pub value: String,
+}
+
+#[derive(Deserialize, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum AccessLogField {
+    Action,
+    Space,
+    Path,
+    Identity,
+    Result,
+}
+
+#[derive(Deserialize, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum TrafficWindow {
+    Hour,
+    Day,
+    Week,
+    Month,
+}
+
+#[derive(Deserialize)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum GovernanceChange {
+    SaveSetting {
+        setting: SettingChange,
+    },
+    RequestSetting {
+        setting: SettingChange,
+        reason: Option<String>,
+    },
+    RequestQuota {
+        direction: QuotaDirection,
+        size: f64,
+        unit: QuotaUnit,
+        reason: Option<String>,
+    },
+}
+
+#[derive(Deserialize, Serialize)]
+#[serde(tag = "key", content = "value")]
+pub enum SettingChange {
+    #[serde(rename = "cost_estimation_enabled")]
+    CostEstimation(Option<bool>),
+    #[serde(rename = "browser_access_enabled")]
+    BrowserAccess(Option<bool>),
+    #[serde(rename = "allow_private_storage_space_create")]
+    PrivateSpaces(Option<bool>),
+    #[serde(rename = "allow_portal_named_bucket_create")]
+    NamedBuckets(Option<bool>),
+    #[serde(rename = "allow_portal_user_access_key_create")]
+    PersonalKeys(Option<bool>),
+    #[serde(rename = "allow_portal_user_external_sharing")]
+    ExternalSharing(Option<bool>),
+    #[serde(rename = "server_access_logging_enabled")]
+    ServerAccessLogging(Option<bool>),
+    #[serde(rename = "storage_space_version_cleanup_enabled")]
+    VersionCleanup(Option<bool>),
+    #[serde(rename = "bucket_defaults.versioning")]
+    DefaultVersioning(Option<bool>),
+    #[serde(rename = "bucket_defaults.enable_lifecycle")]
+    DefaultLifecycle(Option<bool>),
+    #[serde(rename = "bucket_defaults.enable_cors")]
+    DefaultCors(Option<bool>),
+    #[serde(rename = "bucket_defaults.noncurrent_version_expiration_days")]
+    DefaultRetention(Option<u32>),
+    #[serde(rename = "bucket_defaults.cors_allowed_origins")]
+    DefaultCorsOrigins(Option<Vec<String>>),
+}
+
+#[derive(Deserialize, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum QuotaDirection {
+    Increase,
+    Decrease,
+}
+
+#[derive(Deserialize, Serialize)]
+pub enum QuotaUnit {
+    MiB,
+    GiB,
+    TiB,
+}
+
+#[derive(Deserialize, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum RequestStatus {
+    Pending,
+    Processing,
+    Approved,
+    Rejected,
+    Failed,
+}
+
+#[derive(Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RequestType {
+    PortalUserAccess,
+    PortalUserRemoval,
+    AccountQuotaChange,
+    PortalSettingChange,
+}
+
+#[derive(Deserialize, Serialize)]
+pub struct AdminRequestQuery {
+    pub page: u64,
+    pub page_size: u64,
+    pub search: String,
+    pub status: Option<RequestStatus>,
+    pub request_type: Option<RequestType>,
+    pub account_id: Option<u64>,
+}
+
+#[derive(Deserialize)]
+#[serde(tag = "kind", rename_all = "lowercase")]
+pub enum AdminResponse {
+    Approve { message: Option<String> },
+    Reject { message: Option<String> },
+    Message { message: String },
+}
+
+#[derive(Deserialize, Serialize)]
+pub struct LogExport {
+    pub date_from: chrono::NaiveDate,
+    pub date_to: chrono::NaiveDate,
+    pub timezone_offset_minutes: i32,
+    pub space_id: Option<String>,
 }
