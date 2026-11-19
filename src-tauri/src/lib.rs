@@ -86,6 +86,8 @@ pub fn run() {
             transfer_commands::export_transfer_report,
             transfer_commands::cancel_job,
             transfer_commands::compare_locations,
+            transfer_commands::compare_buckets,
+            transfer_commands::remediate_bucket_difference,
             transfer_commands::location_usage,
             transfer_commands::check_integrity,
             administration_commands::administer,

@@ -4,13 +4,19 @@ use tauri::State;
 use uuid::Uuid;
 
 use crate::{
+    audit::service::AuditService,
     common::error::Result,
+    connection::model::{IdentityKind, Workspace},
     connection::service::ConnectionService,
     object::model::{Location, ObjectVersion},
 };
 
 use super::{
-    batch, inventory,
+    batch,
+    bucket_comparison::{
+        self, BucketComparison, BucketPair, ComparisonRequest, ComparisonScope, Remediation,
+    },
+    inventory,
     model::{Comparison, Integrity, Job, Transfer, Usage, VersionPlanItem, VersionRule},
     security::AccessInput,
     service::TransferService,
@@ -44,6 +50,42 @@ pub async fn compare_locations(
     let source_session = connections.session(source.connection)?;
     let target_session = connections.session(target.connection)?;
     inventory::compare(&source_session.s3, &source, &target_session.s3, &target).await
+}
+
+#[tauri::command]
+pub async fn compare_buckets(
+    connections: State<'_, Arc<ConnectionService>>,
+    source: Uuid,
+    target: Uuid,
+    request: ComparisonRequest,
+) -> Result<BucketComparison> {
+    let source = connections.session_for(source, Workspace::Manager, IdentityKind::S3)?;
+    let target = connections.session_for(target, Workspace::Manager, IdentityKind::S3)?;
+    bucket_comparison::compare(&source, &target, request).await
+}
+
+#[tauri::command]
+pub async fn remediate_bucket_difference(
+    audit: State<'_, AuditService>,
+    connections: State<'_, Arc<ConnectionService>>,
+    scope: ComparisonScope,
+    pair: BucketPair,
+    action: Remediation,
+) -> Result<()> {
+    let (source, target) = scope.connections();
+    let source = connections.session_for(source, Workspace::Manager, IdentityKind::S3)?;
+    let destination = connections.session_for(target, Workspace::Manager, IdentityKind::S3)?;
+    let resource = match &action {
+        Remediation::Object { key, .. } => format!("{}/{}", pair.target, key),
+        Remediation::Configuration { .. } => pair.target.clone(),
+    };
+    let result = bucket_comparison::apply(&source, &destination, scope, pair, action).await;
+    audit.record(
+        target,
+        "Apply bucket comparison difference",
+        Some(resource),
+        result,
+    )
 }
 
 #[tauri::command]

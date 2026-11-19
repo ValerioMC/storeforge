@@ -1,6 +1,7 @@
 use std::collections::{BTreeMap, HashSet};
 
 use aws_sdk_s3::Client;
+use chrono::{DateTime, Utc};
 
 use crate::{
     common::error::{AppError, Result, storage_error},
@@ -16,6 +17,12 @@ pub async fn objects(client: &Client, location: &Location) -> Result<Vec<ObjectR
     let mut rows = Vec::new();
     visit_objects(client, location, |page| rows.extend(page)).await?;
     Ok(rows)
+}
+
+pub(super) fn parse_modified(value: &str) -> Option<DateTime<Utc>> {
+    DateTime::parse_from_rfc3339(value)
+        .ok()
+        .map(|date| date.with_timezone(&Utc))
 }
 
 pub async fn visit_objects(

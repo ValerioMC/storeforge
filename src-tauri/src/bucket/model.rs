@@ -7,7 +7,7 @@ pub struct Bucket {
     pub created_at: Option<String>,
 }
 
-#[derive(Clone, Copy, Deserialize)]
+#[derive(Clone, Copy, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub enum Configuration {
     Versioning,

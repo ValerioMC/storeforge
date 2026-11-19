@@ -62,6 +62,11 @@ fn is_missing_configuration(message: &str) -> bool {
     message.trim() == "404 Not Found"
 }
 
+pub(crate) fn configuration_removable(configuration: Configuration) -> bool {
+    let (_, _, removable) = resource(configuration);
+    removable
+}
+
 fn resource(configuration: Configuration) -> (&'static str, &'static str, bool) {
     use Configuration::*;
     let (subresource, removable) = match configuration {

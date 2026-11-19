@@ -385,7 +385,7 @@ function showJob(id: string): void {
               :initial-group="route.workspace === 'cephAdmin' ? route.group : undefined" :demo="demo" @open="openProfile"
               @notifications="(bucket, arn) => go({ workspace: 'manager', page: 'buckets', bucket, notificationTopic: arn })" />
             <ToolsWorkspace v-else-if="managerRoute?.page === 'tools'" :key="`tools:${connections.contextKey}`" :location="toolsLocation"
-              :profiles="managerProfiles" :source-buckets="browser.buckets" :demo="demo" @job="showJob" @source="go({ workspace: 'manager', page: 'tools', bucket: $event })" />
+              :profiles="managerProfiles" :source-buckets="browser.buckets" :demo="demo" @browse="openFavorite" @job="showJob" @source="go({ workspace: 'manager', page: 'tools', bucket: $event })" />
             <ActivityWorkspace v-else-if="route.workspace === 'admin' && route.page === 'activity'" key="activity" :demo="demo" :preselected="route.jobId ?? null" :audit="route.audit"
               @browse="canBrowse ? go({ workspace: 'browser' }) : canManage ? go({ workspace: 'manager', page: 'buckets' }) : go({ workspace: 'admin', page: 'connections' })" />
             <WorkspacePreferences v-else-if="route.workspace === 'admin' && route.page === 'preferences'" v-model:compact="compact" v-model:show-tags="showTags"

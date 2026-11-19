@@ -16,19 +16,21 @@ import type { Connection } from '../../connection/model/connection'
 import { transfersApi } from '../api/transfers'
 import type { Comparison, Integrity, Transfer, Usage } from '../model/transfer'
 import { useJobs } from '../store/jobs'
+import BucketComparison from './BucketComparison.vue'
 
 const props = defineProps<{ location: Location; profiles: Connection[]; sourceBuckets: Bucket[]; demo: boolean }>()
-const emit = defineEmits<{ job: [id: string]; source: [bucket: string] }>()
+const emit = defineEmits<{ job: [id: string]; source: [bucket: string]; browse: [location: Location] }>()
 const jobs = useJobs()
 const options = [
   { name: 'Compare', icon: ArrowLeftRight },
+  { name: 'Prefix compare', icon: ArrowLeftRight },
   { name: 'Migrate', icon: FolderSync },
   { name: 'Usage', icon: ChartNoAxesColumn },
   { name: 'Integrity', icon: ListChecks },
   { name: 'Multipart', icon: Database },
   { name: 'Purge', icon: Trash2 },
 ] as const
-const tab = ref<(typeof options)[number]['name']>('Compare')
+const tab = ref<(typeof options)[number]['name']>(props.location.prefix ? 'Prefix compare' : 'Compare')
 const targetId = ref(props.location.connection)
 const targetBucket = ref('')
 const targetPrefix = ref('')
@@ -45,7 +47,7 @@ const comparison = ref<Comparison>()
 const usage = ref<Usage>()
 const integrity = ref<Integrity>()
 const multipart = ref<MultipartUpload[]>()
-const needsTarget = computed(() => tab.value === 'Compare' || tab.value === 'Migrate')
+const needsTarget = computed(() => tab.value === 'Prefix compare' || tab.value === 'Migrate')
 const targetConnections = computed(() => [
   ...(props.demo ? [{ value: 'demo', label: 'Asteria Research (demo)' }] : []),
   ...props.profiles.map(profile => ({ value: profile.id, label: profile.name })),
@@ -102,7 +104,7 @@ async function run(): Promise<void> {
   error.value = ''
   try {
     const location = props.location
-    if (tab.value === 'Compare') {
+    if (tab.value === 'Prefix compare') {
       const result = await transfersApi.compare(location, target.value)
       if (id === request) comparison.value = result
     } else if (tab.value === 'Usage') {
@@ -157,14 +159,12 @@ async function abort(): Promise<void> {
   <section class="workspace-page">
     <div class="page-header">
       <div><h1>Storage tools</h1><p>Compare, migrate, and maintain objects under a bucket or prefix.</p></div>
-      <div class="tools-source">
+      <div v-if="tab !== 'Compare'" class="tools-source">
         <label for="tools-source-bucket">Source bucket</label>
         <AppSelect id="tools-source-bucket" :model-value="location.bucket" :options="sourceBucketOptions" placeholder="Select a bucket" @update:model-value="emit('source', $event)" />
         <code v-if="location.prefix">{{ location.prefix }}</code>
       </div>
     </div>
-    <EmptyState v-if="!location.bucket" :icon="Database" title="Select a source bucket" description="Choose a source above. To target one prefix, open it in Browser and launch the storage tools from the object list." />
-    <template v-else>
       <Notice v-if="demo">Select a live connection to scan, migrate, or change objects.</Notice>
       <nav class="workspace-tabs tool-tabs" aria-label="Storage tools">
         <button v-for="option in options" :key="option.name" :aria-pressed="tab === option.name" :class="{ active: tab === option.name }" @click="tab = option.name">
@@ -173,11 +173,14 @@ async function abort(): Promise<void> {
       </nav>
       <div class="stage-panel tools-panel">
         <FadeRegion>
-          <div :key="tab">
+          <BucketComparison v-if="tab === 'Compare'" :location="location" :profiles="profiles" :source-buckets="sourceBuckets" :demo="demo"
+            @browse="emit('browse', $event)" @job="emit('job', $event)" />
+          <EmptyState v-else-if="!location.bucket" :key="tab" :icon="Database" title="Select a source bucket" description="Choose a bucket above to start." />
+          <div v-else :key="tab">
             <form class="panel-form" @submit.prevent="review">
               <div class="stage-heading">
                 <div><h2>{{ tab }}</h2>
-                  <p v-if="tab === 'Compare'">Compare relative keys, sizes, and ETags across two locations.</p>
+                  <p v-if="tab === 'Prefix compare'">Compare relative keys, sizes, and ETags across two locations.</p>
                   <p v-else-if="tab === 'Migrate'">Copy all current objects under the source prefix to a destination.</p>
                   <p v-else-if="tab === 'Usage'">Count objects and bytes with an optional scan of versions and delete markers.</p>
                   <p v-else-if="tab === 'Integrity'">Check each listed key against the metadata currently returned by the endpoint.</p>
@@ -232,7 +235,6 @@ async function abort(): Promise<void> {
           </div>
         </FadeRegion>
       </div>
-    </template>
     <ConfirmDialog v-if="confirm" :title="confirm === 'Purge' ? 'Purge this location?' : 'Start migration?'"
       :description="confirm === 'Purge' ? `Delete ${includeVersions ? 'all versions and delete markers' : 'current objects'} in ${location.bucket}/${location.prefix}.` : `Copy current objects to ${target.bucket}/${target.prefix}. ${overwrite ? 'Existing destination keys may be overwritten.' : 'Existing keys are protected.'}`"
       :action="confirm === 'Purge' ? 'Purge objects' : 'Start migration'" :phrase="confirm === 'Purge' ? location.bucket : undefined" :danger="confirm === 'Purge'" @close="confirm = undefined" @confirm="start" />

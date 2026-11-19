@@ -3,6 +3,7 @@ import { desktop, isTauri } from '../../../common/tauri'
 import type { Location, ObjectVersion } from '../../browser/model/objects'
 import type { Comparison, Integrity, Job, Transfer, Usage } from '../model/transfer'
 
+import type { BucketComparison, BucketComparisonRequest, BucketPair, ComparisonScope, Remediation } from '../model/bucket-comparison'
 import type { TransferAccess } from '../model/access'
 import type { VersionPlanItem, VersionRule } from '../model/batch'
 
@@ -11,6 +12,10 @@ export const transfersApi = {
   start: (transfer: Transfer, access?: TransferAccess) => desktop<string>('start_transfer', { transfer, access }),
   cancel: (id: string) => desktop<void>('cancel_job', { id }),
   compare: (source: Location, target: Location) => desktop<Comparison>('compare_locations', { source, target }),
+  compareBuckets: (source: string, target: string, request: BucketComparisonRequest) =>
+    desktop<BucketComparison>('compare_buckets', { source, target, request }),
+  remediate: (scope: ComparisonScope, pair: BucketPair, action: Remediation) =>
+    desktop<void>('remediate_bucket_difference', { scope, pair, action }),
   usage: (location: Location, includeVersions: boolean) => desktop<Usage>('location_usage', { location, includeVersions }),
   integrity: (location: Location) => desktop<Integrity>('check_integrity', { location }),
   history: (location: Location) => desktop<ObjectVersion[]>('prefix_history', { location }),

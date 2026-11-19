@@ -30,6 +30,7 @@ const MAX_PARTS: u64 = 10_000;
 pub struct UploadOptions<'a> {
     pub content_type: String,
     pub overwrite: bool,
+    pub expected_etag: Option<String>,
     pub metadata: Option<HashMap<String, String>>,
     pub cache_control: Option<String>,
     pub content_disposition: Option<String>,
@@ -93,6 +94,7 @@ pub async fn upload_observed(
                 .and_then(UploadEncryption::key_id)
                 .map(str::to_owned),
         )
+        .set_if_match(options.expected_etag)
         .set_if_none_match((!options.overwrite).then(|| "*".into()))
         .body(body);
     let uploaded = customer_headers!(put, options.access.customer)
@@ -143,7 +145,7 @@ async fn multipart_upload(
         path,
         size,
         &upload_id,
-        (options.overwrite, options.access),
+        (options.overwrite, options.expected_etag, options.access),
         observe,
     )
     .await;
@@ -170,7 +172,7 @@ async fn upload_parts(
     path: &Path,
     size: u64,
     upload_id: &str,
-    (overwrite, access): (bool, UploadAccess<'_>),
+    (overwrite, expected_etag, access): (bool, Option<String>, UploadAccess<'_>),
     observe: &(impl Fn(u64) -> Result<()> + Sync),
 ) -> Result<UploadReceipt> {
     let part_bytes = PART_BYTES.max(size.div_ceil(MAX_PARTS));
@@ -214,6 +216,7 @@ async fn upload_parts(
         .bucket(bucket)
         .key(key)
         .upload_id(upload_id)
+        .set_if_match(expected_etag)
         .set_if_none_match((!overwrite).then(|| "*".into()))
         .multipart_upload(
             CompletedMultipartUpload::builder()
