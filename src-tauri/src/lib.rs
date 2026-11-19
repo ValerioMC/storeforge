@@ -22,7 +22,11 @@ use bucket::controller as bucket_commands;
 use connection::{
     controller as connection_commands, repository::ConnectionRepository, service::ConnectionService,
 };
-use monitoring::{controller as monitoring_commands, service::MonitoringService};
+use monitoring::{
+    controller as monitoring_commands,
+    service::MonitoringService,
+    storage_costs::{StorageCosts, controller as cost_commands},
+};
 use object::controller as object_commands;
 use transfer::{
     controller as transfer_commands, repository::JobRepository, service::TransferService,
@@ -47,6 +51,7 @@ pub fn run() {
                 directory.clone(),
             )?);
             app.manage(MonitoringService::open(directory.clone())?);
+            app.manage(StorageCosts::new(directory.clone()));
             app.manage(AuditService::open(directory.clone())?);
             app.manage(administration::private_access::PrivateAccessService::new(
                 directory.clone(),
@@ -123,6 +128,11 @@ pub fn run() {
             monitoring_commands::monitoring_cached,
             monitoring_commands::monitoring_collect,
             monitoring_commands::monitoring_check,
+            cost_commands::storage_cost_report,
+            cost_commands::storage_cost_settings,
+            cost_commands::storage_cost_collect,
+            cost_commands::storage_cost_summary,
+            cost_commands::storage_cost_export,
         ]);
     #[cfg(target_os = "macos")]
     let builder = builder.on_window_event(dock_icon::on_window_event);

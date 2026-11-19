@@ -6,7 +6,7 @@ import WorkspaceTabs from '../../../components/shell/WorkspaceTabs.vue'
 import AppSelect from '../../../components/ui/AppSelect.vue'
 import FadeRegion from '../../../components/ui/FadeRegion.vue'
 import type { MetricPage } from '../../connection/model/workspace'
-import { formatCount, formatFraction, mergeDistribution, rankedBuckets, storageTotals, sumKnown, transferBytes } from '../model/dashboard'
+import { formatCount, formatFraction, mergeDistribution, rankedBuckets, storageTotals, sumKnown } from '../model/dashboard'
 import type { MonitoringView } from '../model/monitoring'
 import BucketMetricsTable from './BucketMetricsTable.vue'
 import CoverageLabel from './CoverageLabel.vue'
@@ -120,14 +120,11 @@ const history = computed(() => props.view?.[period.value] ?? [])
         <p v-if="traffic?.detail" class="monitoring-panel-note">{{ traffic.detail }}</p>
       </WorkspacePanel>
 
-      <WorkspacePanel v-else title="Cost inputs" description="Measured storage and transfer for this scope">
-        <dl class="monitoring-facts">
-          <div><dt>Current storage</dt><dd>{{ formatSize(totals.bytes) }}</dd></div>
-          <div><dt>Noncurrent storage</dt><dd>{{ formatSize(totals.noncurrentBytes) }}</dd></div>
-          <div><dt>Transfer · 24h</dt><dd>{{ formatSize(transferBytes(traffic)) }}</dd></div>
-        </dl>
-        <p class="monitoring-panel-note">Cost estimates require configured rates for this endpoint.</p>
-      </WorkspacePanel>
+      <slot v-else name="cost">
+        <WorkspacePanel title="Storage costs">
+          <p class="workspace-panel-message">Open Admin storage costs for estimates across registered endpoints.</p>
+        </WorkspacePanel>
+      </slot>
     </div>
   </FadeRegion>
 </template>

@@ -107,7 +107,7 @@ pub(crate) fn gateway(
     )
 }
 
-fn fixture(directory: &Path, endpoint: String) -> (ConnectionService, Keyring, Uuid) {
+pub(crate) fn fixture(directory: &Path, endpoint: String) -> (ConnectionService, Keyring, Uuid) {
     let store = ConnectionRepository::open(directory.to_owned()).unwrap();
     let credentials = Keyring::default();
     let id = Uuid::new_v4();

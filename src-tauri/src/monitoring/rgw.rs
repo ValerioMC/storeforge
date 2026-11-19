@@ -57,6 +57,15 @@ pub async fn traffic(
 ) -> Reading<TrafficPeriod> {
     let end = DateTime::from_timestamp(now.timestamp().div_euclid(3600) * 3600, 0).unwrap_or(now);
     let start = end - TimeDelta::hours(24);
+    traffic_for_period(session, start, end, owner).await
+}
+
+pub async fn traffic_for_period(
+    session: &Session,
+    start: DateTime<Utc>,
+    end: DateTime<Utc>,
+    owner: Option<&str>,
+) -> Reading<TrafficPeriod> {
     let mut filters = vec![
         ("start", start.format("%Y-%m-%d %H:%M:%S").to_string()),
         ("end", end.format("%Y-%m-%d %H:%M:%S").to_string()),

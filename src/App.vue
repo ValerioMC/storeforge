@@ -29,6 +29,7 @@ import { defaultRoute, isWorkspaceRoute, routeTitle, workspaceAvailable, workspa
 import { useConnections } from './features/connection/store/connections'
 import { useWorkspaceNavigation } from './features/connection/store/workspace-navigation'
 import MonitoringWorkspace from './features/monitoring/components/MonitoringWorkspace.vue'
+import StorageCostsWorkspace from './features/monitoring/components/StorageCostsWorkspace.vue'
 import ActivityWorkspace from './features/transfer/components/ActivityWorkspace.vue'
 import ToolsWorkspace from './features/transfer/components/ToolsWorkspace.vue'
 import { useJobs } from './features/transfer/store/jobs'
@@ -65,6 +66,8 @@ const realmOptions = computed(() => connections.active ? [
 const canBrowse = computed(() => workspaceAvailable(connections.active, 'browser'))
 const canManage = computed(() => workspaceAvailable(connections.active, 'manager'))
 const managerProfiles = computed(() => connections.profiles.filter(profile => workspaceAvailable(profile, 'manager')))
+const costScopeKey = computed(() => connections.profiles.filter(profile => identityAvailable(profile, 'adminOps'))
+  .map(profile => [profile.id, profile.revision, profile.services?.adminOps?.principalId]).join(';'))
 const managerRoute = computed(() => route.value.workspace === 'manager' ? route.value : undefined)
 const monitoringRoute = computed(() => {
   const current = route.value
@@ -304,6 +307,15 @@ function go(destination: WorkspaceDestination): void {
   openRoute({ ...destination, connectionId: connections.activeId })
 }
 
+function backToCostList(): void {
+  const previous = navigation.previous
+  if (previous?.workspace === 'admin' && previous.page === 'costs' && !previous.costSubject && previous.connectionId === route.value.connectionId) {
+    history('back')
+  } else {
+    navigation.replace({ workspace: 'admin', page: 'costs', connectionId: route.value.connectionId })
+  }
+}
+
 function openMonitoringDestination(destination: WorkspaceDestination, connectionId = connections.activeId): void {
   const target = { ...destination, connectionId }
   if (routeAllowed(target)) openRoute(target)
@@ -417,9 +429,12 @@ function showJob(id: string): void {
 
       <div class="work-area">
         <FadeRegion>
-          <KeepAlive include="BrowserWorkspace,ManagerWorkspace,MonitoringWorkspace,ActivityWorkspace,ToolsWorkspace,BucketWorkbench" :max="12">
+          <KeepAlive include="BrowserWorkspace,ManagerWorkspace,MonitoringWorkspace,ActivityWorkspace,ToolsWorkspace,BucketWorkbench,StorageCostsWorkspace" :max="12">
             <BrowserWorkspace v-if="route.workspace === 'browser'" key="browser" ref="browserView" :demo="demo" :compact="compact" @add="openEditor()"
               @demo="openDemo" @create-bucket="creatingBucket = true" @tools="go({ workspace: 'manager', page: 'tools' })" @job="jobStarted" @navigate="openBucket" @favorite="openFavorite" />
+            <StorageCostsWorkspace v-else-if="route.workspace === 'admin' && route.page === 'costs'" key="storage-costs"
+              :subject="route.costSubject" :subject-month="route.costMonth" :compact="compact" :scope-key="costScopeKey"
+              @inspect="(costSubject, costMonth) => go({ workspace: 'admin', page: 'costs', costSubject, costMonth })" @back="backToCostList" />
             <MonitoringWorkspace v-else-if="monitoringRoute" :key="`monitoring:${monitoringRoute.workspace}:${monitoringRoute.pane}:${connections.contextKey}`"
               :workspace="monitoringRoute.workspace" :pane="monitoringRoute.pane" :metric="monitoringRoute.metric"
               :profile="connections.active" :profiles="connections.profiles" :compact="compact"

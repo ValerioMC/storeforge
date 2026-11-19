@@ -1,10 +1,11 @@
 import { demoBuckets, demoPrefix } from '../../browser/model/demo'
+import { validCostMonth } from '../../monitoring/model/storage-costs'
 import { executionContext, identityAvailable, type Connection } from './connection'
 
 export type DesktopWorkspace = 'browser' | 'manager' | 'cephAdmin' | 'storageOps' | 'admin'
 export type ManagerPage = 'overview' | 'buckets' | 'featureRules' | 'access' | 'tools' | 'metrics'
 export type CephPage = 'overview' | 'buckets' | 'resources' | 'metrics' | 'health' | 'multisite'
-export type AdminPage = 'overview' | 'connections' | 'preferences' | 'activity' | 'metrics' | 'health' | 'rgwIdentities'
+export type AdminPage = 'overview' | 'connections' | 'preferences' | 'activity' | 'metrics' | 'health' | 'rgwIdentities' | 'costs'
 export type MetricPage = 'usage' | 'history' | 'traffic' | 'cost'
 export type CephGroup = 'Ceph accounts' | 'Ceph users' | 'Ceph buckets'
 export type WorkspaceDestination =
@@ -12,7 +13,7 @@ export type WorkspaceDestination =
   | { workspace: 'manager'; page: ManagerPage; bucket?: string; metric?: MetricPage; notificationTopic?: string }
   | { workspace: 'cephAdmin'; page?: CephPage; metric?: MetricPage; group?: CephGroup; bucket?: string; workbenchBucket?: string }
   | { workspace: 'storageOps'; page: 'overview' | 'buckets'; workbenchBucket?: string }
-  | { workspace: 'admin'; page: AdminPage; jobId?: string; audit?: boolean; metric?: MetricPage }
+  | { workspace: 'admin'; page: AdminPage; jobId?: string; audit?: boolean; metric?: MetricPage; costSubject?: string; costMonth?: string }
 export type WorkspaceRoute = WorkspaceDestination & { connectionId: string }
 
 export const workspaceNames: Record<DesktopWorkspace, string> = {
@@ -26,7 +27,7 @@ const cephPages: Record<CephPage, string> = {
 }
 export const adminPages: Record<AdminPage, string> = {
   overview: 'Overview', metrics: 'Usage & metrics', health: 'Endpoint health', connections: 'Connections', preferences: 'Preferences', activity: 'Activity',
-  rgwIdentities: 'Managed RGW identities',
+  rgwIdentities: 'Managed RGW identities', costs: 'Storage costs',
 }
 
 export function workspaceAvailable(profile: Connection | undefined, workspace: DesktopWorkspace): boolean {
@@ -75,7 +76,10 @@ export function isWorkspaceRoute(value: unknown): value is WorkspaceRoute {
   }
   if (value.workspace === 'browser') return hasOptionalString(value, 'bucket') && hasOptionalString(value, 'prefix')
   if (!('page' in value) || typeof value.page !== 'string') return false
-  if (value.workspace === 'admin') return Object.hasOwn(adminPages, value.page) && hasOptionalString(value, 'jobId') && (!('audit' in value) || typeof value.audit === 'boolean')
+  if (value.workspace === 'admin') return Object.hasOwn(adminPages, value.page) && hasOptionalString(value, 'jobId') &&
+    (!('audit' in value) || typeof value.audit === 'boolean') &&
+    (!('costSubject' in value) || value.page === 'costs' && typeof value.costSubject === 'string') &&
+    (!('costMonth' in value) || 'costSubject' in value && typeof value.costMonth === 'string' && validCostMonth(value.costMonth))
   return value.workspace === 'manager' && Object.hasOwn(managerPages, value.page) &&
     hasOptionalString(value, 'bucket') && (!('notificationTopic' in value) ||
       value.page === 'buckets' && 'bucket' in value && typeof value.notificationTopic === 'string')

@@ -9,6 +9,7 @@ export const useWorkspaceNavigation = defineStore('workspace-navigation', () => 
   const routes = ref<WorkspaceRoute[]>([])
   const index = ref(0)
   const current = computed(() => routes.value[index.value])
+  const previous = computed(() => routes.value[index.value - 1])
   const canBack = computed(() => index.value > 0)
   const canForward = computed(() => index.value < routes.value.length - 1)
 
@@ -61,7 +62,7 @@ export const useWorkspaceNavigation = defineStore('workspace-navigation', () => 
     }
   }
 
-  return { current, canBack, canForward, initialize, reset, go, replace, back, forward }
+  return { current, previous, canBack, canForward, initialize, reset, go, replace, back, forward }
 })
 
 interface StoredHistory {

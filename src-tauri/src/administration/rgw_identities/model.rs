@@ -136,7 +136,7 @@ pub enum Enforcement {
     Failed { message: String },
 }
 
-#[derive(Clone, Deserialize, PartialEq, Serialize)]
+#[derive(Clone, Deserialize, Eq, Hash, PartialEq, Serialize)]
 pub struct RegistryScope {
     pub endpoint: Uuid,
     pub admin_url: String,

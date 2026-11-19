@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
-import { Activity, Box, Cable, ChevronDown, Database, FolderCog, KeyRound, LayoutDashboard, Layers, Plus, Search, Settings2, ShieldCheck, SlidersHorizontal, Star, Users } from 'lucide-vue-next'
+import { Activity, Box, Cable, ChevronDown, Database, FolderCog, KeyRound, LayoutDashboard, Layers, Plus, Search, Settings2, ShieldCheck, SlidersHorizontal, Star, Users, Wallet } from 'lucide-vue-next'
 import icon from '../../assets/storeforge.png'
 import { useBrowser } from '../../features/browser/store/browser'
 import { useConnections } from '../../features/connection/store/connections'
@@ -28,6 +28,7 @@ const adminLinks = [
   { label: 'Access & topics', icon: KeyRound, destination: { workspace: 'manager', page: 'access' } },
   { label: 'Ceph Admin', icon: ShieldCheck, destination: { workspace: 'cephAdmin' } },
   { label: 'Admin overview', icon: LayoutDashboard, destination: { workspace: 'admin', page: 'overview' } },
+  { label: 'Storage costs', icon: Wallet, destination: { workspace: 'admin', page: 'costs' } },
   { label: 'Managed RGW identities', icon: Users, destination: { workspace: 'admin', page: 'rgwIdentities' } },
   { label: 'Connections', icon: Cable, destination: { workspace: 'admin', page: 'connections' } },
   { label: 'Activity', icon: Activity, destination: { workspace: 'admin', page: 'activity' } },

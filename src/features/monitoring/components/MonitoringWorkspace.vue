@@ -3,18 +3,22 @@ import { computed, nextTick, onActivated, ref, watch } from 'vue'
 import { Activity, ArrowUpRight, Database, FolderCog, Network, RefreshCw, Users, Wallet } from 'lucide-vue-next'
 import { formatDate } from '../../../common/format'
 import WorkspaceHeader from '../../../components/shell/WorkspaceHeader.vue'
+import WorkspacePanel from '../../../components/shell/WorkspacePanel.vue'
 import AppSelect from '../../../components/ui/AppSelect.vue'
 import Notice from '../../../components/ui/Notice.vue'
 import { identityAvailable, providerNames, type Connection, type IdentityKind } from '../../connection/model/connection'
 import { workspaceAvailable, type CephGroup, type MetricPage, type WorkspaceDestination } from '../../connection/model/workspace'
 import { useAdminMonitoring } from '../composables/useAdminMonitoring'
 import { useMonitoring } from '../composables/useMonitoring'
+import { useScopedCosts } from '../composables/useScopedCosts'
 import { demoMonitoring } from '../model/demo'
 import type { CheckMode } from '../model/monitoring'
+import { utcDay } from '../model/storage-costs'
 import AdminOverview from './AdminOverview.vue'
 import HealthPanel from './HealthPanel.vue'
 import ManagerOverview from './ManagerOverview.vue'
 import MonitoringMetrics from './MonitoringMetrics.vue'
+import ScopedCosts from './ScopedCosts.vue'
 import '../monitoring.css'
 
 const props = defineProps<{
@@ -32,6 +36,9 @@ const aggregateProfiles = computed(() => allEndpoints.value && !demo.value ? pro
 const { view, pending, error, run } = useMonitoring(target)
 const admin = useAdminMonitoring(aggregateProfiles)
 const sample = computed(() => demo.value ? demoMonitoring : view.value)
+const costMonth = computed(() => utcDay().slice(0, 7))
+const costProfile = computed(() => props.workspace === 'manager' && props.metric === 'cost' && target.value?.provider === 'ceph' && !demo.value ? target.value.id : undefined)
+const scopedCosts = useScopedCosts(costProfile, costMonth)
 const effectiveProfiles = computed(() => demo.value && props.profile ? [props.profile] : props.profiles)
 const endpointRows = computed(() => target.value ? [{ profile: target.value, view: sample.value }] : [])
 const overviewEndpoints = computed(() => demo.value && props.profile ? [{ profile: props.profile, view: demoMonitoring }] : admin.endpoints.value)
@@ -134,7 +141,7 @@ function refresh(): void {
         </template>
       </p>
       <div v-if="workspace === 'manager' && pane === 'overview'" class="workspace-actions">
-        <button class="subtle" @click="openMetric('cost')"><Wallet :size="15" /> Cost inputs</button>
+        <button class="subtle" @click="openMetric('cost')"><Wallet :size="15" /> Estimated costs</button>
         <button :disabled="demo" @click="$emit('create')">New bucket</button>
       </div>
     </div>
@@ -148,7 +155,15 @@ function refresh(): void {
     </div>
     <p v-else-if="!target" class="monitoring-empty">Add a connection to view its metrics and health.</p>
     <div v-else-if="pane === 'metrics'" class="monitoring-stack">
-      <MonitoringMetrics v-model="metricTab" :view="sample" :endpoint-traffic="workspace !== 'manager'" @bucket="openBucket" />
+      <MonitoringMetrics v-model="metricTab" :view="sample" :endpoint-traffic="workspace !== 'manager'" @bucket="openBucket">
+        <template #cost>
+          <ScopedCosts v-if="workspace === 'manager'" :month="costMonth" :summary="scopedCosts.summary.value"
+            :pending="scopedCosts.pending.value" :error="scopedCosts.error.value" />
+          <WorkspacePanel v-else title="Storage costs">
+            <button type="button" @click="open({ workspace: 'admin', page: 'costs' })">Open storage costs <ArrowUpRight :size="14" /></button>
+          </WorkspacePanel>
+        </template>
+      </MonitoringMetrics>
     </div>
     <div v-else-if="pane === 'health'" class="monitoring-stack">
       <HealthPanel :endpoints="endpointRows" timeline />
