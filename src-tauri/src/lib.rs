@@ -14,15 +14,15 @@ use std::sync::Arc;
 use tauri::{Manager, WebviewWindowBuilder};
 
 use administration::{
-    controller as administration_commands, rgw_identities::RgwIdentityService,
-    service::AdministrationService,
+    controller as administration_commands, platform_governance::controller as governance_commands,
+    rgw_identities::RgwIdentityService, service::AdministrationService,
 };
 use audit::{controller as audit_commands, service::AuditService};
 use bucket::controller as bucket_commands;
+use connection::shared_service::{controller as shared_service_commands, service::SharedService};
 use connection::{
     controller as connection_commands, repository::ConnectionRepository, service::ConnectionService,
 };
-use connection::shared_service::{controller as shared_service_commands, service::SharedService};
 use monitoring::{
     controller as monitoring_commands,
     service::MonitoringService,
@@ -125,6 +125,13 @@ pub fn run() {
             transfer_commands::check_migration,
             transfer_commands::restore_migration_access,
             transfer_commands::migration_action,
+            governance_commands::list_platform_access,
+            governance_commands::export_platform_access,
+            governance_commands::list_platform_groups,
+            governance_commands::list_platform_connections,
+            governance_commands::list_private_platform_connections,
+            governance_commands::save_platform_group,
+            governance_commands::rename_platform_connection,
             administration_commands::administer,
             administration_commands::list_private_iam,
             administration_commands::change_private_iam,

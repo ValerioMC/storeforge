@@ -1,6 +1,9 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use url::Url;
 use uuid::Uuid;
+
+use crate::common::error::{AppError, Result};
 
 #[derive(Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -32,6 +35,12 @@ pub struct ServiceSession {
     pub expires_at: DateTime<Utc>,
 }
 
+impl ServiceSession {
+    pub fn admin_available(&self) -> bool {
+        self.access.admin.available && self.principal.role.is_admin()
+    }
+}
+
 #[derive(Clone, Deserialize, Serialize)]
 pub struct ServicePrincipal {
     pub id: i64,
@@ -49,7 +58,13 @@ pub enum ServiceRole {
     UiUser,
 }
 
-#[derive(Clone, Deserialize, Serialize)]
+impl ServiceRole {
+    pub fn is_admin(self) -> bool {
+        matches!(self, Self::UiAdmin | Self::UiSuperadmin)
+    }
+}
+
+#[derive(Clone, Default, Deserialize, Serialize)]
 #[serde(rename_all(serialize = "camelCase"))]
 pub struct WorkspaceAccess {
     pub admin: WorkspaceAvailability,
@@ -60,7 +75,7 @@ pub struct WorkspaceAccess {
     pub portal: WorkspaceAvailability,
 }
 
-#[derive(Clone, Deserialize, Serialize)]
+#[derive(Clone, Default, Deserialize, Serialize)]
 #[serde(rename_all(serialize = "camelCase"))]
 pub struct WorkspaceAvailability {
     pub available: bool,
@@ -126,19 +141,52 @@ pub struct ContextCapabilities {
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum InteractiveAction {
+    AccountProfile,
     AccountSecurity,
+    PrivateConnections,
     IdentitySecurity,
+    ApiTokens,
+    AuthenticationSettings,
+    AdminUsers,
+    AdminGroups,
+    SharedConnections,
+    AccessReview,
+    ReviewUser { id: i64, search: String },
+    ReviewGroup { id: i64, search: String },
 }
 
 impl InteractiveAction {
-    pub fn path(&self) -> &'static str {
-        match self {
+    pub fn url(&self, origin: &Url) -> Result<Url> {
+        let path = match self {
+            Self::AccountProfile => "/profile?tab=profile",
             Self::AccountSecurity => "/profile?tab=security",
+            Self::PrivateConnections => "/profile?tab=connections",
             Self::IdentitySecurity => "/admin/identity-security",
+            Self::ApiTokens => "/admin/profile?tab=api-tokens",
+            Self::AuthenticationSettings => "/admin/authentication-settings",
+            Self::AdminUsers | Self::ReviewUser { .. } => "/admin/users",
+            Self::AdminGroups | Self::ReviewGroup { .. } => "/admin/groups",
+            Self::SharedConnections => "/admin/s3-connections",
+            Self::AccessReview => "/admin/access-audit",
+        };
+        let mut url = origin
+            .join(path)
+            .map_err(|_| AppError::Invalid("Invalid browser action.".into()))?;
+        if let Self::ReviewUser { id, search } | Self::ReviewGroup { id, search } = self {
+            if *id <= 0 {
+                return Err(AppError::Invalid("Select a principal to review.".into()));
+            }
+            url.query_pairs_mut()
+                .append_pair("edit", &id.to_string())
+                .append_pair("search", search);
         }
+        Ok(url)
     }
 
     pub fn admin_only(&self) -> bool {
-        matches!(self, Self::IdentitySecurity)
+        !matches!(
+            self,
+            Self::AccountProfile | Self::AccountSecurity | Self::PrivateConnections
+        )
     }
 }

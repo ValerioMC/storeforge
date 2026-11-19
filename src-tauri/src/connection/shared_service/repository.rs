@@ -1,6 +1,6 @@
 use std::{path::PathBuf, time::Duration};
 
-use reqwest::{Response, StatusCode, header};
+use reqwest::{Method, RequestBuilder, Response, StatusCode, header};
 use serde::{Serialize, de::DeserializeOwned};
 use url::Url;
 
@@ -35,7 +35,7 @@ impl ProfileRepository {
     }
 }
 
-pub(super) struct SharedServiceRepository {
+pub(crate) struct SharedServiceRepository {
     client: reqwest::Client,
 }
 
@@ -52,10 +52,69 @@ impl SharedServiceRepository {
     pub async fn get<T: DeserializeOwned, Q: Serialize + ?Sized>(
         &self,
         origin: &Url,
-        path: &'static str,
+        path: &str,
         query: &Q,
         token: Option<&str>,
     ) -> Result<T> {
+        let request = self
+            .request(Method::GET, origin, path, token)?
+            .header(header::ACCEPT, "application/json")
+            .query(query);
+        Self::json(request).await
+    }
+
+    pub async fn change<T: DeserializeOwned, D: Serialize>(
+        &self,
+        method: Method,
+        origin: &Url,
+        path: &str,
+        token: &str,
+        draft: &D,
+    ) -> Result<T> {
+        let body = serde_json::to_vec(draft)?;
+        let request = self
+            .request(method, origin, path, Some(token))?
+            .header(header::ACCEPT, "application/json")
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(body);
+        Self::json(request).await
+    }
+
+    pub async fn csv<Q: Serialize>(
+        &self,
+        origin: &Url,
+        path: &str,
+        query: &Q,
+        token: &str,
+    ) -> Result<String> {
+        let request = self
+            .request(Method::GET, origin, path, Some(token))?
+            .header(header::ACCEPT, "text/csv")
+            .query(query);
+        let response = Self::send(request).await?;
+        let content_type = response
+            .headers()
+            .get(header::CONTENT_TYPE)
+            .and_then(|value| value.to_str().ok())
+            .unwrap_or_default();
+        if content_type.split(';').next() != Some("text/csv") {
+            return Err(AppError::Storage(
+                "The shared service did not return a CSV document.".into(),
+            ));
+        }
+        response
+            .text()
+            .await
+            .map_err(|_| AppError::Storage("Could not read the access review CSV.".into()))
+    }
+
+    fn request(
+        &self,
+        method: Method,
+        origin: &Url,
+        path: &str,
+        token: Option<&str>,
+    ) -> Result<RequestBuilder> {
         let url = origin
             .join(path)
             .map_err(|_| AppError::Invalid("Invalid service route.".into()))?;
@@ -64,20 +123,23 @@ impl SharedServiceRepository {
                 "The request must use the configured service origin.".into(),
             ));
         }
-        let mut request = self
-            .client
-            .get(url)
-            .header(header::ACCEPT, "application/json")
-            .query(query);
-        if let Some(token) = token {
-            request = request.bearer_auth(token);
-        }
+        let request = self.client.request(method, url);
+        Ok(match token {
+            Some(token) => request.bearer_auth(token),
+            None => request,
+        })
+    }
+
+    async fn send(request: RequestBuilder) -> Result<Response> {
         let response = request
             .send()
             .await
             .map_err(|_| AppError::Storage("Could not reach the shared service.".into()))?;
-        let response = check_response(response)?;
-        let body = read_body(response).await?;
+        check_response(response)
+    }
+
+    async fn json<T: DeserializeOwned>(request: RequestBuilder) -> Result<T> {
+        let body = read_body(Self::send(request).await?).await?;
         serde_json::from_slice(&body).map_err(|_| {
             AppError::Storage("The shared service returned an unexpected response.".into())
         })

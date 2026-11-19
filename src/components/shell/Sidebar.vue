@@ -30,6 +30,7 @@ const adminLinks = [
   { label: 'Admin overview', icon: LayoutDashboard, destination: { workspace: 'admin', page: 'overview' } },
   { label: 'Storage costs', icon: Wallet, destination: { workspace: 'admin', page: 'costs' } },
   { label: 'Managed RGW identities', icon: Users, destination: { workspace: 'admin', page: 'rgwIdentities' } },
+  { label: 'Platform governance', icon: ShieldCheck, destination: { workspace: 'admin', page: 'governance' } },
   { label: 'Connections', icon: Cable, destination: { workspace: 'admin', page: 'connections' } },
   { label: 'Activity', icon: Activity, destination: { workspace: 'admin', page: 'activity' } },
   { label: 'Preferences', icon: Settings2, destination: { workspace: 'admin', page: 'preferences' } },

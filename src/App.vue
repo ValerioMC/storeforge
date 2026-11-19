@@ -11,6 +11,7 @@ import FadeRegion from './components/ui/FadeRegion.vue'
 import Notice from './components/ui/Notice.vue'
 import AdminWorkspace from './features/administration/components/AdminWorkspace.vue'
 import CephMultisite from './features/administration/components/CephMultisite.vue'
+import PlatformGovernance from './features/administration/components/PlatformGovernance.vue'
 import BrowserWorkspace from './features/browser/components/BrowserWorkspace.vue'
 import type { Location } from './features/browser/model/objects'
 import { demoConnection } from './features/browser/model/demo'
@@ -488,6 +489,8 @@ function showJob(id: string): void {
               @browse="canBrowse ? go({ workspace: 'browser' }) : canManage ? go({ workspace: 'manager', page: 'buckets' }) : go({ workspace: 'admin', page: 'connections' })" />
             <WorkspacePreferences v-else-if="route.workspace === 'admin' && route.page === 'preferences'" v-model:compact="compact" v-model:show-tags="showTags"
               v-model:startup="startup" :profiles="connections.profiles.filter(profile => !profile.settings?.openstack)" />
+            <PlatformGovernance v-else-if="route.workspace === 'admin' && route.page === 'governance'"
+              @connections="go({ workspace: 'admin', page: 'connections' })" />
             <ConnectionsWorkspace v-else :has-draft="hasDraft" @add="openEditor()" @edit="openEditor" @browse="openProfile" @demo="openDemo" />
           </KeepAlive>
         </FadeRegion>

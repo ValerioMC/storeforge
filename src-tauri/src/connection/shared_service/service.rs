@@ -16,7 +16,7 @@ use crate::common::error::{AppError, Result};
 use super::{
     model::{
         InteractiveAction, ServiceDraft, ServicePrincipal, ServiceProfile, ServiceSession,
-        ServiceStatus, SharedContext, SharedWorkspace, WorkspaceAccess,
+        ServiceStatus, SharedContext, SharedWorkspace, WorkspaceAccess, WorkspaceAvailability,
     },
     repository::{ProfileRepository, SharedServiceRepository},
 };
@@ -47,6 +47,12 @@ struct ExpiryClaims {
 #[derive(Deserialize)]
 struct RuntimeSurfaces {
     admin: bool,
+    #[serde(default)]
+    manager: bool,
+    #[serde(default)]
+    browser: bool,
+    #[serde(default)]
+    portal: bool,
 }
 
 impl SharedService {
@@ -172,14 +178,8 @@ impl SharedService {
                 "This shared service account is inactive.".into(),
             ));
         }
-        let access: WorkspaceAccess = self
-            .remote
-            .get(
-                &origin,
-                "/api/me/workspace-access",
-                &[] as &[(&str, &str)],
-                Some(token.trim()),
-            )
+        let access = self
+            .workspace_access(&origin, &principal, token.trim())
             .await?;
         let mut profiles = self.profiles()?;
         let entry = current_profile(&mut profiles, id, revision)?;
@@ -198,35 +198,82 @@ impl SharedService {
         Ok(view)
     }
 
+    async fn workspace_access(
+        &self,
+        origin: &Url,
+        principal: &ServicePrincipal,
+        token: &str,
+    ) -> Result<WorkspaceAccess> {
+        let catalog = self
+            .remote
+            .get(
+                origin,
+                "/api/me/workspace-access",
+                &[] as &[(&str, &str)],
+                Some(token),
+            )
+            .await;
+        let Err(AppError::Missing(_)) = &catalog else {
+            return catalog;
+        };
+        let surfaces = self.runtime_surfaces(origin).await?;
+        if !surfaces.admin || surfaces.manager || surfaces.browser || surfaces.portal {
+            return catalog;
+        }
+        let available = principal.role.is_admin();
+        Ok(WorkspaceAccess {
+            admin: WorkspaceAvailability {
+                available,
+                context_count: u64::from(available),
+            },
+            ..WorkspaceAccess::default()
+        })
+    }
+
+    async fn runtime_surfaces(&self, origin: &Url) -> Result<RuntimeSurfaces> {
+        self.remote
+            .get(
+                origin,
+                "/api/settings/runtime-surfaces",
+                &[] as &[(&str, &str)],
+                None,
+            )
+            .await
+    }
+
     pub async fn contexts(
         &self,
         id: Uuid,
         workspace: SharedWorkspace,
     ) -> Result<Vec<SharedContext>> {
-        self.read_scoped(
+        self.scoped(
             id,
-            |access| workspace.available(access),
-            "/api/me/execution-contexts",
-            &[("workspace", workspace)],
+            |session| workspace.available(&session.access),
+            async |remote, origin, token| {
+                remote
+                    .get(
+                        origin,
+                        "/api/me/execution-contexts",
+                        &[("workspace", workspace)],
+                        Some(token),
+                    )
+                    .await
+            },
         )
         .await
     }
 
-    pub(super) async fn read_scoped<
-        T: serde::de::DeserializeOwned,
-        Q: serde::Serialize + ?Sized,
-    >(
+    pub(crate) async fn scoped<T>(
         &self,
         id: Uuid,
-        available: impl FnOnce(&WorkspaceAccess) -> bool,
-        path: &'static str,
-        query: &Q,
+        available: impl FnOnce(&ServiceSession) -> bool,
+        request: impl AsyncFnOnce(&SharedServiceRepository, &Url, &str) -> Result<T>,
     ) -> Result<T> {
         let (revision, origin, session) = {
             let mut profiles = self.profiles()?;
             let entry = get_profile(&mut profiles, id)?;
             let session = entry.current_session().ok_or_else(reauthorize)?;
-            if !available(&session.view.access) {
+            if !available(&session.view) {
                 return Err(AppError::AuthorizationDenied(
                     "This workspace is unavailable for the shared service connection.".into(),
                 ));
@@ -237,10 +284,7 @@ impl SharedService {
                 session,
             )
         };
-        let result = self
-            .remote
-            .get(&origin, path, query, Some(session.token.trim()))
-            .await;
+        let result = request(&self.remote, &origin, session.token.trim()).await;
         let mut profiles = self.profiles()?;
         let entry = current_profile(&mut profiles, id, revision)?;
         if matches!(result, Err(AppError::Reauthenticate(_))) {
@@ -261,15 +305,7 @@ impl SharedService {
             )
         };
         if action.admin_only() {
-            let surfaces: RuntimeSurfaces = self
-                .remote
-                .get(
-                    &origin,
-                    "/api/settings/runtime-surfaces",
-                    &[] as &[(&str, &str)],
-                    None,
-                )
-                .await?;
+            let surfaces = self.runtime_surfaces(&origin).await?;
             if !surfaces.admin {
                 return Err(AppError::AuthorizationDenied(
                     "The service does not expose the Admin workspace.".into(),
@@ -277,9 +313,7 @@ impl SharedService {
             }
         }
         current_profile(&mut *self.profiles()?, id, revision)?;
-        origin
-            .join(action.path())
-            .map_err(|_| AppError::Invalid("Invalid browser action.".into()))
+        action.url(&origin)
     }
 
     fn profiles(&self) -> Result<MutexGuard<'_, BTreeMap<Uuid, SavedService>>> {

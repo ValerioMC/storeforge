@@ -9,7 +9,9 @@ export interface SharedServiceProfile extends SharedServiceDraft {
 
 export type SharedWorkspace = 'manager' | 'browser'
 export type ServiceWorkspace = SharedWorkspace | 'admin' | 'cephAdmin' | 'storageOps' | 'portal'
-export type SharedAction = 'accountSecurity' | 'identitySecurity'
+export type SharedAction = 'accountProfile' | 'accountSecurity' | 'privateConnections' | 'identitySecurity' |
+  'apiTokens' | 'authenticationSettings' | 'adminUsers' | 'adminGroups' | 'sharedConnections' | 'accessReview' |
+  { reviewUser: { id: number; search: string } } | { reviewGroup: { id: number; search: string } }
 
 export interface SharedPrincipal {
   id: number
