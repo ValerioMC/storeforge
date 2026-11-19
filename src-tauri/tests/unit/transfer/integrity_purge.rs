@@ -280,6 +280,50 @@ async fn purge_deletes_bucket_only_after_all_reviewed_versions_succeed() {
     assert!(!requests[4].contains("versionId="));
 }
 
+fn bucket_not_empty() -> Response {
+    response(
+        "409 Conflict",
+        "<Error><Code>BucketNotEmpty</Code></Error>",
+    )
+}
+
+#[tokio::test]
+async fn deleting_a_non_empty_bucket_removes_its_versions_before_the_bucket() {
+    let entries = [
+        version("hidden", "old", false, "2025-01-01T00:00:00Z"),
+        marker("hidden", "marker"),
+    ]
+    .join("");
+    let (endpoint, server) = object_drawer_mock(vec![
+        bucket_not_empty(),
+        listing(&entries),
+        response("204 No Content", ""),
+        response("204 No Content", ""),
+        response("204 No Content", ""),
+    ]);
+    let session = fixture(&endpoint);
+    delete_bucket_with_contents(&session, "full").await.unwrap();
+    let requests = server.join().unwrap();
+    assert!(requests[0].starts_with("DELETE /full"));
+    assert!(requests[2].contains("versionId=old"));
+    assert!(requests[3].contains("versionId=marker"));
+    assert!(requests[4].starts_with("DELETE /full"));
+    assert!(!requests[4].contains("versionId="));
+}
+
+#[tokio::test]
+async fn deleting_a_non_empty_bucket_keeps_it_when_an_entry_cannot_be_deleted() {
+    let entries = version("locked", "v1", true, "2025-01-01T00:00:00Z");
+    let (endpoint, server) =
+        object_drawer_mock(vec![bucket_not_empty(), listing(&entries), denied()]);
+    let session = fixture(&endpoint);
+    let error = delete_bucket_with_contents(&session, "full")
+        .await
+        .unwrap_err();
+    assert!(error.to_string().contains("1 entries could not be deleted"));
+    assert_eq!(server.join().unwrap().len(), 3);
+}
+
 #[tokio::test]
 async fn full_get_fails_when_the_download_body_is_truncated() {
     let (endpoint, requests) = object_drawer_mock(vec![(

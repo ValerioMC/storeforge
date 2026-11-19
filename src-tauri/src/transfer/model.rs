@@ -39,6 +39,9 @@ pub enum Transfer {
     Delete {
         connection: Uuid,
         objects: Vec<ObjectId>,
+        #[serde(default)]
+        folders: Vec<String>,
+        bucket: Option<String>,
     },
     Tag {
         connection: Uuid,

@@ -16,6 +16,7 @@ use crate::{
         service::ConnectionService,
     },
     monitoring::model::{BucketUsage, Reading},
+    transfer::maintenance,
 };
 
 use super::{
@@ -210,7 +211,9 @@ pub async fn delete_bucket(
     connection: Uuid,
     bucket: String,
 ) -> Result<()> {
-    let result = BucketService::delete(&connections.bucket_session(connection)?, &bucket).await;
+    let result =
+        maintenance::delete_bucket_with_contents(&connections.bucket_session(connection)?, &bucket)
+            .await;
     audit.record(connection, "Delete bucket", Some(bucket), result)
 }
 

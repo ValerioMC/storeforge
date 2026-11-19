@@ -215,7 +215,21 @@ impl TransferService {
             Transfer::Delete {
                 connection,
                 objects,
+                folders,
+                bucket,
             } => {
+                let client = self.connections.session(connection)?.s3;
+                let bucket = bucket
+                    .or_else(|| objects.first().map(|object| object.bucket.clone()))
+                    .ok_or_else(|| {
+                        AppError::Invalid("Select objects or folders to delete.".into())
+                    })?;
+                let source = Location {
+                    connection,
+                    bucket,
+                    prefix: String::new(),
+                };
+                let objects = batch::expand_selection(&client, &source, objects, folders).await?;
                 self.change_objects(progress, connection, objects, None)
                     .await
             }

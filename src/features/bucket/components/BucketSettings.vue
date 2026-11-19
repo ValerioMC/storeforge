@@ -250,13 +250,13 @@ defineExpose({
         </div>
       </FadeRegion>
     </div>
-    <div v-if="!scopedRequest" class="danger-zone"><div><h3>Delete empty bucket</h3><p>Remove the bucket after all objects and versions have been removed.</p></div>
+    <div v-if="!scopedRequest" class="danger-zone"><div><h3>Delete bucket</h3><p>Remove the bucket together with all of its objects and versions.</p></div>
       <button :disabled="demo || busy" class="danger-outline" @click="confirm = 'bucket'"><Trash2 :size="16" /> Delete bucket</button>
     </div>
     <BucketBackupDialog v-if="backup" :mode="backup" :connection="connection" :bucket="bucket" :editors="editors" :scoped-request="scopedRequest"
       @close="backup = undefined" @changed="emit('changed')" />
     <ConfirmDialog v-if="confirm" :title="confirm === 'write' ? `Update ${current.label.toLowerCase()}?` : confirm === 'bucket' ? 'Delete bucket?' : 'Remove configuration?'"
-      :description="confirm === 'bucket' ? `${bucket} will be removed from the selected endpoint.` : `This applies to the ${bucket} bucket on the selected connection.`"
+      :description="confirm === 'bucket' ? `${bucket} and every object and version in it will be permanently removed from the selected endpoint.` : `This applies to the ${bucket} bucket on the selected connection.`"
       :action="confirm === 'write' ? 'Apply settings' : confirm === 'bucket' ? 'Delete bucket' : 'Remove setting'"
       :phrase="confirm === 'bucket' ? bucket : undefined" :danger="confirm !== 'write'" @close="confirm = undefined" @confirm="apply" />
   </div>

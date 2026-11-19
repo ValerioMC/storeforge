@@ -63,6 +63,7 @@ const submitting = ref(false)
 const renameObject = ref<ObjectId>()
 const renameDraft = ref('')
 const deleteItems = ref<ObjectId[]>([])
+const deleteFolders = ref<string[]>([])
 const pasteReview = ref(false)
 const pathDraft = ref('')
 const editPath = ref(false)
@@ -113,16 +114,18 @@ const pasteDescription = computed(() => {
 const operationLocation = computed(() => browser.location)
 const pasteTargetName = computed(() => connections.active?.name)
 const pasteTargetPath = computed(() => 's3://' + browser.bucket + '/' + browser.prefix)
-const deleteDescription = computed(() => deleteItems.value.length === 1
-  ? deleteItems.value[0]?.key + ' will be deleted from ' + browser.bucket + '. Versioned buckets may retain a delete marker.'
-  : 'Delete ' + deleteItems.value.length + ' objects from ' + browser.bucket + '. Versioned buckets may retain delete markers.')
+const deleteDescription = computed(() => deleteFolders.value.length
+  ? 'Delete ' + deleteFolders.value.length + ' folders, including everything inside them, and ' + deleteItems.value.length + ' objects from ' + browser.bucket + '. Versioned buckets may retain delete markers.'
+  : deleteItems.value.length === 1
+    ? deleteItems.value[0]?.key + ' will be deleted from ' + browser.bucket + '. Versioned buckets may retain a delete marker.'
+    : 'Delete ' + deleteItems.value.length + ' objects from ' + browser.bucket + '. Versioned buckets may retain delete markers.')
 const managerAvailable = computed(() => workspaceAvailable(connections.active, 'manager'))
 const readonly = computed(() => props.demo || !browser.bucket)
 
 watch(() => connections.contextKey, () => {
   folder.value = false
   attributes.value = false
-  deleteItems.value = []
+  cancelDelete()
   pasteReview.value = false
 }, { flush: 'sync' })
 watch(listingLocation, () => {
@@ -132,7 +135,7 @@ watch(listingLocation, () => {
   maintenance.value = false
   renameObject.value = undefined
   pasteReview.value = false
-  deleteItems.value = []
+  cancelDelete()
   rowMenu.value = undefined
   returnFocus = undefined
   versionOpener = undefined
@@ -406,9 +409,15 @@ function sortBy(column: SortColumn): void {
   applyListing()
 }
 
-function beginDelete(objects: ObjectId[]): void {
-  if (browser.focus && includesObject(objects, browser.focus)) leaveInspector(() => { deleteItems.value = objects })
-  else deleteItems.value = objects
+function beginDelete(objects: ObjectId[], folders: string[]): void {
+  const stage = () => { deleteItems.value = objects; deleteFolders.value = folders }
+  if (browser.focus && includesObject(objects, browser.focus)) leaveInspector(stage)
+  else stage()
+}
+
+function cancelDelete(): void {
+  deleteItems.value = []
+  deleteFolders.value = []
 }
 
 function includesObject(objects: ObjectId[], current: ObjectId): boolean {
@@ -417,13 +426,16 @@ function includesObject(objects: ObjectId[], current: ObjectId): boolean {
 
 async function remove(): Promise<void> {
   const objects = deleteItems.value
-  deleteItems.value = []
-  if (!objects.length) return
+  const folders = deleteFolders.value
+  cancelDelete()
+  if (!objects.length && !folders.length) return
   const context = listingLocation.value
   const connection = browser.location.connection
+  const bucket = browser.bucket
   await run(async () => {
-    await enqueue({ kind: 'delete', connection, objects })
+    await enqueue({ kind: 'delete', connection, objects, folders, bucket })
     if (listingLocation.value === context) {
+      selectedFolders.value = selectedFolders.value.filter(key => !folders.includes(key))
       browser.selected = browser.selected.filter(key => !includesObject(objects, objectId(browser.bucket, key)))
       if (browser.focus && includesObject(objects, browser.focus)) closeInspector()
     }
@@ -624,7 +636,7 @@ async function copyPath(): Promise<void> {
                     <button :disabled="readonly" title="Stage copy" @click="selectedStage(false)"><Copy :size="15" /><span>Copy</span></button>
                     <button :disabled="readonly" title="Stage move" @click="selectedStage(true)"><Scissors :size="15" /><span>Cut</span></button>
                     <button :disabled="readonly" @click="failure = ''; attributes = true">Attributes</button>
-                    <button :disabled="readonly || !browser.selected.length || !!selectedFolders.length" class="danger-outline" aria-label="Delete selected objects" @click="beginDelete(browser.selectedObjects)"><Trash2 :size="15" /></button>
+                    <button :disabled="readonly" class="danger-outline" aria-label="Delete selected items" @click="beginDelete(browser.selectedObjects, selectedFolders)"><Trash2 :size="15" /></button>
                     <button class="icon-button subtle" aria-label="Clear selection" @click="clearSelection"><X :size="15" /></button>
                   </div>
                   <div v-if="clipboard" class="selection-buttons"><button :disabled="readonly" @click="pasteReview = true"><ClipboardPaste :size="15" />Paste</button>
@@ -663,7 +675,7 @@ async function copyPath(): Promise<void> {
             :object="browser.focus" :deleted="browser.focus.deleted" :initial-tab="browser.focus.initialTab" :demo="demo"
             :metadata-drafts="browser.metadataDrafts" :tag-drafts="browser.tagDrafts" :has-previous="!!previousObject" :has-next="!!nextObject"
             @close="closeInspector" @move="moveObject" @download="download(browser.location.connection, [$event])" @secure-download="chooseSecureObjectDownload" @changed="objectChanged"
-            @version-changed="versionChanged" @remove="beginDelete([$event])" @metadata-draft="saveMetadataDraft" @tag-draft="saveTagDraft" />
+            @version-changed="versionChanged" @remove="beginDelete([$event], [])" @metadata-draft="saveMetadataDraft" @tag-draft="saveTagDraft" />
         </FadeRegion>
       </div>
       <section v-else class="workspace-page start-page">
@@ -708,9 +720,9 @@ async function copyPath(): Promise<void> {
         </footer>
       </form>
     </Modal>
-    <ConfirmDialog v-if="deleteItems.length" title="Delete selected objects?"
+    <ConfirmDialog v-if="deleteItems.length || deleteFolders.length" title="Delete selected items?"
       :description="deleteDescription"
-      action="Delete objects" danger @close="deleteItems = []" @confirm="remove" />
+      action="Delete items" danger @close="cancelDelete" @confirm="remove" />
     <ConfirmDialog v-if="pasteReview && clipboard" :title="clipboard.move ? 'Move selected objects?' : 'Copy selected objects?'"
       :description="pasteDescription"
       :action="clipboard.move ? 'Move objects' : 'Copy objects'" @close="pasteReview = false" @confirm="acceptPaste">

@@ -1,6 +1,7 @@
 use aws_sdk_s3::{
     Client,
     config::Region,
+    error::ProvideErrorMetadata,
     types::{
         BucketLocationConstraint, BucketVersioningStatus, CreateBucketConfiguration,
         VersioningConfiguration,
@@ -145,6 +146,19 @@ impl BucketService {
             .await
             .map_err(storage_error)?;
         Ok(())
+    }
+
+    pub async fn delete_unless_not_empty(session: &Session, bucket: &str) -> Result<bool> {
+        match session.s3.delete_bucket().bucket(bucket).send().await {
+            Ok(_) => Ok(true),
+            Err(error)
+                if error.as_service_error().and_then(ProvideErrorMetadata::code)
+                    == Some("BucketNotEmpty") =>
+            {
+                Ok(false)
+            }
+            Err(error) => Err(storage_error(error)),
+        }
     }
 }
 

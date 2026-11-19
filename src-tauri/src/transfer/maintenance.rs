@@ -594,6 +594,40 @@ pub async fn run_purge(
     Ok(result)
 }
 
+const BUCKET_EMPTYING_PARALLELISM: usize = 8;
+
+pub async fn delete_bucket_with_contents(session: &Session, bucket: &str) -> Result<()> {
+    if BucketService::delete_unless_not_empty(session, bucket).await? {
+        return Ok(());
+    }
+    let scope = BucketScope {
+        bucket: bucket.into(),
+        prefix: String::new(),
+    };
+    let items = scan_items(&session.s3, &scope.location(session.profile.id), true).await?;
+    let (history, current): (Vec<_>, Vec<_>) = items.into_iter().partition(|item| !item.latest);
+    let client = write_client(&session.s3);
+    let mut result = BucketResult::new(scope);
+    for items in [history, current] {
+        run_items(
+            &client,
+            items,
+            BUCKET_EMPTYING_PARALLELISM,
+            ScanAction::Purge,
+            &mut result,
+            &|_| Ok(true),
+        )
+        .await?;
+        if let Some(failure) = result.failures.first() {
+            return Err(AppError::Storage(format!(
+                "{} entries could not be deleted. {}",
+                result.failed, failure.message
+            )));
+        }
+    }
+    BucketService::delete(session, bucket).await
+}
+
 #[derive(Clone, Copy)]
 enum ScanAction {
     Integrity(IntegrityMethod),
