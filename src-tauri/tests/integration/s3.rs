@@ -55,7 +55,7 @@ async fn endpoint_object_lifecycle() {
     let context = describe_context(&profile, Workspace::Browser, IdentityKind::S3).unwrap();
     let session = open_session(profile, context, credentials).unwrap();
     let bucket = format!("storeforge-test-{}", uuid::Uuid::new_v4().simple());
-    BucketService::create(&session, &bucket, false)
+    BucketService::create(&session, &bucket, false, None, false)
         .await
         .unwrap();
     let location = Location {

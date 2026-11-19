@@ -2,14 +2,14 @@ import { demoBuckets, demoPrefix } from '../../browser/model/demo'
 import { executionContext, identityAvailable, type Connection } from './connection'
 
 export type DesktopWorkspace = 'browser' | 'manager' | 'cephAdmin' | 'admin'
-export type ManagerPage = 'overview' | 'buckets' | 'access' | 'tools' | 'metrics'
+export type ManagerPage = 'overview' | 'buckets' | 'featureRules' | 'access' | 'tools' | 'metrics'
 export type CephPage = 'overview' | 'resources' | 'metrics' | 'health'
 export type AdminPage = 'overview' | 'connections' | 'preferences' | 'activity' | 'metrics' | 'health'
 export type MetricPage = 'usage' | 'history' | 'traffic' | 'cost'
 export type CephGroup = 'Ceph accounts' | 'Ceph users' | 'Ceph buckets'
 export type WorkspaceDestination =
   | { workspace: 'browser'; bucket?: string; prefix?: string }
-  | { workspace: 'manager'; page: ManagerPage; bucket?: string; filterBucket?: boolean; metric?: MetricPage }
+  | { workspace: 'manager'; page: ManagerPage; bucket?: string; metric?: MetricPage }
   | { workspace: 'cephAdmin'; page?: CephPage; metric?: MetricPage; group?: CephGroup; bucket?: string }
   | { workspace: 'admin'; page: AdminPage; jobId?: string; audit?: boolean; metric?: MetricPage }
 export type WorkspaceRoute = WorkspaceDestination & { connectionId: string }
@@ -18,7 +18,7 @@ export const workspaceNames: Record<DesktopWorkspace, string> = {
   browser: 'Browser', manager: 'Manager', cephAdmin: 'Ceph Admin', admin: 'Admin',
 }
 export const managerPages: Record<ManagerPage, string> = {
-  overview: 'Overview', metrics: 'Usage & metrics', buckets: 'Buckets', access: 'Access & topics', tools: 'Storage tools',
+  overview: 'Overview', metrics: 'Usage & metrics', buckets: 'Buckets', featureRules: 'Feature rules', access: 'Access & topics', tools: 'Storage tools',
 }
 const cephPages: Record<CephPage, string> = {
   overview: 'Overview', resources: 'RGW resources', metrics: 'Usage & metrics', health: 'Endpoint health',
@@ -71,7 +71,7 @@ export function isWorkspaceRoute(value: unknown): value is WorkspaceRoute {
   if (!('page' in value) || typeof value.page !== 'string') return false
   if (value.workspace === 'admin') return Object.hasOwn(adminPages, value.page) && hasOptionalString(value, 'jobId') && (!('audit' in value) || typeof value.audit === 'boolean')
   return value.workspace === 'manager' && Object.hasOwn(managerPages, value.page) &&
-    hasOptionalString(value, 'bucket') && (!('filterBucket' in value) || typeof value.filterBucket === 'boolean')
+    hasOptionalString(value, 'bucket')
 }
 
 function hasOptionalString(value: object, key: 'bucket' | 'prefix' | 'jobId'): boolean {

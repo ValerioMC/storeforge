@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
-import { Activity, Box, Cable, ChevronDown, Database, FolderCog, KeyRound, LayoutDashboard, Plus, Search, Settings2, ShieldCheck, Star } from 'lucide-vue-next'
+import { Activity, Box, Cable, ChevronDown, Database, FolderCog, KeyRound, LayoutDashboard, Plus, Search, Settings2, ShieldCheck, SlidersHorizontal, Star } from 'lucide-vue-next'
 import icon from '../../assets/storeforge.png'
 import { useBrowser } from '../../features/browser/store/browser'
 import { useConnections } from '../../features/connection/store/connections'
@@ -19,6 +19,7 @@ const storageLinks = [
   { label: 'Overview', icon: LayoutDashboard, destination: { workspace: 'manager', page: 'overview' } },
   { label: 'Usage & metrics', icon: Activity, destination: { workspace: 'manager', page: 'metrics' } },
   { label: 'Bucket inventory', icon: Database, destination: { workspace: 'manager', page: 'buckets' } },
+  { label: 'Feature rules', icon: SlidersHorizontal, destination: { workspace: 'manager', page: 'featureRules' } },
   { label: 'Storage tools', icon: FolderCog, destination: { workspace: 'manager', page: 'tools' } },
 ] as const
 const adminLinks = [

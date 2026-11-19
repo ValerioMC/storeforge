@@ -34,9 +34,32 @@ pub async fn configure(
             ));
         }
     };
-    SignedClient::for_connection(&session.profile)?
+    let response = SignedClient::for_connection(&session.profile)?
         .send(session, "s3", request(method, url, content_type, body)?)
-        .await
+        .await;
+    match response {
+        Err(AppError::Missing(message)) if !is_missing_configuration(&message) => {
+            Err(AppError::Storage(message))
+        }
+        response => response,
+    }
+}
+
+fn is_missing_configuration(message: &str) -> bool {
+    #[derive(serde::Deserialize)]
+    #[serde(rename_all = "PascalCase")]
+    struct S3Error {
+        code: String,
+    }
+
+    let document = message.find('<').map(|start| &message[start..]);
+    if let Some(document) = document
+        && let Ok(error) = quick_xml::de::from_str::<S3Error>(document)
+    {
+        return (error.code.starts_with("NoSuch") && error.code != "NoSuchBucket")
+            || error.code == "ObjectLockConfigurationNotFoundError";
+    }
+    message.trim() == "404 Not Found"
 }
 
 fn resource(configuration: Configuration) -> (&'static str, &'static str, bool) {

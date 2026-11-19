@@ -50,6 +50,16 @@ pub(crate) async fn rgw_request(
     resource: &str,
     filters: impl IntoIterator<Item = (impl AsRef<str>, impl AsRef<str>)>,
 ) -> Result<String> {
+    rgw_request_with_body(session, method, resource, filters, None).await
+}
+
+pub(crate) async fn rgw_request_with_body(
+    session: &Session,
+    method: Method,
+    resource: &str,
+    filters: impl IntoIterator<Item = (impl AsRef<str>, impl AsRef<str>)>,
+    json: Option<Vec<u8>>,
+) -> Result<String> {
     let mut url = parse_endpoint(&session.profile.endpoint)?;
     url.path_segments_mut()
         .map_err(|_| AppError::Invalid("Invalid Ceph endpoint.".into()))?
@@ -59,8 +69,13 @@ pub(crate) async fn rgw_request(
     url.query_pairs_mut()
         .append_pair("format", "json")
         .extend_pairs(filters);
+    let content_type = json.as_ref().map(|_| "application/json");
     SignedClient::for_connection(&session.profile)?
-        .send(session, "s3", request(method, url, None, Vec::new())?)
+        .send(
+            session,
+            "s3",
+            request(method, url, content_type, json.unwrap_or_default())?,
+        )
         .await
 }
 

@@ -95,7 +95,7 @@ function openHealth(connection: string): void {
 }
 
 function openBucket(bucket: string): void {
-  if (workspaceAvailable(target.value, 'manager')) open({ workspace: 'manager', page: 'buckets', bucket, filterBucket: true })
+  if (workspaceAvailable(target.value, 'manager')) open({ workspace: 'manager', page: 'buckets', bucket })
   else open({ workspace: 'cephAdmin', page: 'resources', group: 'Ceph buckets', bucket })
 }
 

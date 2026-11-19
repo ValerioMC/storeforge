@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::{fs::File, io::Read, sync::Arc};
 
 use tauri::{State, WebviewWindow};
 use tauri_plugin_dialog::DialogExt;
@@ -11,12 +11,17 @@ use crate::{
         document::write_text,
         error::{AppError, Result},
     },
-    connection::service::ConnectionService,
+    connection::{
+        model::{IdentityKind, Workspace},
+        service::ConnectionService,
+    },
 };
 
 use super::{
-    model::{Bucket, Configuration, ConfigurationChange},
-    repository,
+    model::{
+        Bucket, BucketCreation, BucketQuota, BucketQuotaUpdate, Configuration, ConfigurationChange,
+    },
+    quota, repository,
     service::BucketService,
 };
 
@@ -35,10 +40,44 @@ pub async fn create_bucket(
     connection: Uuid,
     bucket: String,
     object_lock: bool,
+    location: Option<String>,
+    versioning: Option<bool>,
+) -> Result<BucketCreation> {
+    let result = BucketService::create(
+        &connections.session(connection)?,
+        &bucket,
+        object_lock,
+        location.as_deref(),
+        versioning.unwrap_or_default(),
+    )
+    .await;
+    let created = audit.record(connection, "Create bucket", Some(bucket.clone()), result)?;
+    if let Some(error) = &created.versioning_error {
+        let _ = audit.record::<()>(
+            connection,
+            "Enable bucket versioning",
+            Some(bucket),
+            Err(AppError::Storage(error.clone())),
+        );
+    }
+    Ok(created)
+}
+
+#[tauri::command]
+pub async fn finish_bucket_versioning(
+    audit: State<'_, AuditService>,
+    connections: State<'_, Arc<ConnectionService>>,
+    connection: Uuid,
+    bucket: String,
+    location: Option<String>,
 ) -> Result<()> {
-    let result =
-        BucketService::create(&connections.session(connection)?, &bucket, object_lock).await;
-    audit.record(connection, "Create bucket", Some(bucket), result)
+    let result = BucketService::finish_versioning(
+        &connections.session(connection)?,
+        &bucket,
+        location.as_deref(),
+    )
+    .await;
+    audit.record(connection, "Enable bucket versioning", Some(bucket), result)
 }
 
 #[tauri::command]
@@ -79,12 +118,12 @@ pub async fn configure_bucket(
 pub async fn export_bucket_configuration(
     window: WebviewWindow,
     name: String,
-    configuration: Configuration,
+    configuration: Option<Configuration>,
     document: String,
 ) -> Result<bool> {
     let (filter, extension) = match configuration {
-        Configuration::Policy => ("JSON document", "json"),
-        _ => ("XML document", "xml"),
+        None | Some(Configuration::Policy) => ("JSON document", "json"),
+        Some(_) => ("XML document", "xml"),
     };
     let (send, receive) = oneshot::channel();
     window
@@ -112,4 +151,67 @@ pub async fn export_bucket_configuration(
         .await
         .map_err(|error| AppError::File(error.to_string()))??;
     Ok(true)
+}
+
+#[tauri::command]
+pub async fn import_bucket_backup(window: WebviewWindow) -> Result<Option<String>> {
+    let (send, receive) = oneshot::channel();
+    window
+        .dialog()
+        .file()
+        .set_title("Open bucket configuration backup")
+        .set_parent(&window)
+        .add_filter("StoreForge backup", &["json"])
+        .pick_file(move |choice| {
+            if send.send(choice).is_err() {
+                tracing::debug!("Bucket backup picker was closed");
+            }
+        });
+    let Some(choice) = receive
+        .await
+        .map_err(|error| AppError::File(error.to_string()))?
+    else {
+        return Ok(None);
+    };
+    let path = choice
+        .into_path()
+        .map_err(|error| AppError::File(error.to_string()))?;
+    tokio::task::spawn_blocking(move || {
+        const LIMIT: u64 = 32 * 1024 * 1024;
+        let mut content = String::new();
+        File::open(path)?
+            .take(LIMIT + 1)
+            .read_to_string(&mut content)?;
+        if content.len() as u64 > LIMIT {
+            return Err(AppError::Invalid("The backup exceeds 32 MiB.".into()));
+        }
+        Ok(Some(content))
+    })
+    .await
+    .map_err(|error| AppError::File(error.to_string()))?
+}
+
+#[tauri::command]
+pub async fn read_bucket_quota(
+    connections: State<'_, Arc<ConnectionService>>,
+    connection: Uuid,
+    bucket: String,
+) -> Result<BucketQuota> {
+    let session =
+        connections.session_for(connection, Workspace::CephAdmin, IdentityKind::CephAdmin)?;
+    quota::read(&session, &bucket).await
+}
+
+#[tauri::command]
+pub async fn update_bucket_quota(
+    audit: State<'_, AuditService>,
+    connections: State<'_, Arc<ConnectionService>>,
+    connection: Uuid,
+    bucket: String,
+    update: BucketQuotaUpdate,
+) -> Result<()> {
+    let session =
+        connections.session_for(connection, Workspace::CephAdmin, IdentityKind::CephAdmin)?;
+    let result = quota::write(&session, &bucket, update).await;
+    audit.record(connection, "Change bucket quota", Some(bucket), result)
 }

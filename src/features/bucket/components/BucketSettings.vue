@@ -1,88 +1,96 @@
 <script setup lang="ts">
 import { computed, ref, shallowRef, watch } from 'vue'
 import { Braces, Database, Download, RefreshCw, Trash2, Upload } from 'lucide-vue-next'
-import { errorMessage, isMissing } from '../../../common/tauri'
+import { errorMessage } from '../../../common/tauri'
 import ConfirmDialog from '../../../components/ui/ConfirmDialog.vue'
 import FadeRegion from '../../../components/ui/FadeRegion.vue'
 import Notice from '../../../components/ui/Notice.vue'
 import { bucketsApi } from '../api/buckets'
-import type { Configuration, ConfigurationChange } from '../model/bucket'
+import { useBucketConfiguration } from '../composables/useBucketConfiguration'
+import type { Configuration } from '../model/bucket'
 import { configurations } from '../model/configuration'
-import { readPolicy } from '../model/policy-document'
-import type { JsonObject, JsonValue } from '../model/policy-document'
-import { readXml, writeXml } from '../model/xml-document'
+import type { JsonValue } from '../model/policy-document'
+import { configurationGroups, configurationLabel, extractRules, parseConfiguration, setLifecycleRuleStatus } from '../model/workspace'
+import { writeXml } from '../model/xml-document'
 import { xmlSettings } from '../model/xml-settings'
+import BucketBackupDialog from './BucketBackupDialog.vue'
 import PolicySettingsForm from './PolicySettingsForm.vue'
 import XmlSettingsForm from './XmlSettingsForm.vue'
 
-const props = defineProps<{ connection: string; bucket: string; demo: boolean }>()
-const emit = defineEmits<{ removed: [] }>()
+const props = defineProps<{ connection: string; bucket: string; demo: boolean; managed?: boolean }>()
+const emit = defineEmits<{ removed: []; changed: [] }>()
 const configuration = ref<Configuration>('versioning')
-const current = computed(() => configurations.find(item => item.id === configuration.value) ?? configurations[0]!)
+const current = computed(() => configurations.find(item => item.id === configuration.value)!)
 const schema = computed(() => configuration.value === 'policy' ? undefined : xmlSettings[configuration.value])
+const editors = shallowRef(newEditors())
+const state = computed(() => editors.value.state(configuration.value))
 const xml = shallowRef<XMLDocument>()
-const policy = shallowRef<JsonObject>()
+const policy = shallowRef<JsonValue>()
 const revision = ref(0)
-const document = ref('')
-const original = ref('')
-const busy = ref(false)
+const operationError = ref('')
+const operationNotice = ref('')
 const exporting = ref(false)
-const error = ref('')
-const notice = ref<{ text: string; tone: 'info' | 'success' }>()
+const importing = ref(false)
+const backup = ref<'export' | 'restore'>()
 const confirm = ref<'write' | 'remove' | 'bucket'>()
 const fileInput = ref<HTMLInputElement>()
-let request = 0
+const lifecycleRules = computed(() => configuration.value === 'lifecycle' ? extractRules('lifecycle', state.value.draft) : [])
+const dirty = computed(() => editors.value.dirty.value)
+const busy = computed(() => editors.value.writing.value || importing.value || exporting.value || !!backup.value)
+let scope = 0
 
-watch(() => [props.connection, props.bucket, configuration.value], () => void load(), { immediate: true })
+watch(() => [props.connection, props.bucket, props.demo], () => {
+  scope++
+  editors.value = newEditors()
+  configuration.value = 'versioning'
+  confirm.value = undefined
+  backup.value = undefined
+  importing.value = false
+  exporting.value = false
+}, { flush: 'sync' })
 
-function setDraft(source: string): void {
-  if (schema.value) xml.value = readXml(source, schema.value.root)
-  else policy.value = readPolicy(source)
-  document.value = source
+watch([editors, configuration], ([editor, section]) => {
+  operationError.value = ''
+  operationNotice.value = ''
+  void editor.refresh(section)
+}, { immediate: true })
+
+watch([configuration, () => state.value.draft], ([section, draft]) => {
+  const parsed = parseConfiguration(section, draft)
+  xml.value = parsed.xml
+  policy.value = parsed.policy
   revision.value++
+}, { immediate: true })
+
+function newEditors() {
+  const { connection, bucket, demo } = props
+  return useBucketConfiguration((section, change) => {
+    if (demo) return Promise.resolve(configurations.find(item => item.id === section)!.example)
+    return bucketsApi.configure(connection, bucket, section, change)
+  })
 }
 
-async function load(): Promise<void> {
-  const id = ++request
-  busy.value = true
-  error.value = ''
-  notice.value = undefined
-  confirm.value = undefined
-  xml.value = undefined
-  policy.value = undefined
-  document.value = ''
-  original.value = ''
-  try {
-    const response = props.demo ? current.value.example : await bucketsApi.configure(props.connection, props.bucket, configuration.value, { action: 'read' })
-    if (id !== request) return
-    original.value = response
-    setDraft(response)
-  } catch (failure) {
-    if (id !== request) return
-    setDraft('')
-    if (isMissing(failure)) notice.value = { text: 'This bucket has no saved configuration for this setting.', tone: 'info' }
-    else error.value = errorMessage(failure)
-  } finally {
-    if (id === request) busy.value = false
-  }
+function labelFor(section: Configuration): string {
+  const settings = editors.value.state(section)
+  if (settings.writing) return 'Saving…'
+  if (settings.busy) return 'Reading…'
+  const status = settings.reading?.status === 'error' ? 'Read error' : settings.reading?.label
+  return [status, settings.draft !== settings.original ? 'Draft' : ''].filter(Boolean).join(' · ')
+}
+
+function edit(source: string): void {
+  parseConfiguration(configuration.value, source)
+  editors.value.edit(configuration.value, source)
+  operationNotice.value = ''
+  operationError.value = ''
 }
 
 function updateXml(): void {
-  if (!xml.value) return
-  document.value = writeXml(xml.value.documentElement)
-  revision.value++
+  if (xml.value) edit(writeXml(xml.value.documentElement))
 }
 
 function updatePolicy(value: JsonValue): void {
-  if (value === null || typeof value !== 'object' || Array.isArray(value)) return
-  policy.value = value
-  document.value = JSON.stringify(value, null, 2)
-}
-
-function loadExample(): void {
-  setDraft(current.value.example)
-  error.value = ''
-  notice.value = undefined
+  if (value !== null && typeof value === 'object' && !Array.isArray(value)) edit(JSON.stringify(value, null, 2))
 }
 
 async function importFile(event: Event): Promise<void> {
@@ -90,43 +98,33 @@ async function importFile(event: Event): Promise<void> {
   const file = input.files?.[0]
   input.value = ''
   if (!file) return
-  const id = ++request
-  busy.value = true
+  const id = scope
+  const section = configuration.value
+  importing.value = true
   try {
     const source = await file.text()
-    if (id !== request) return
+    if (id !== scope || section !== configuration.value) return
     if (!source.trim()) throw new Error('The configuration file is empty.')
-    setDraft(source)
-    error.value = ''
-    notice.value = { text: 'Configuration imported. Apply settings to save it to the bucket.', tone: 'info' }
+    edit(source)
+    operationNotice.value = 'Configuration imported into the draft.'
   } catch (failure) {
-    if (id === request) error.value = errorMessage(failure)
+    if (id === scope && section === configuration.value) operationError.value = errorMessage(failure)
   } finally {
-    if (id === request) busy.value = false
+    if (id === scope) importing.value = false
   }
 }
 
 async function exportFile(): Promise<void> {
   exporting.value = true
-  const id = request
+  const id = scope
+  const section = configuration.value
   try {
-    if (await bucketsApi.exportConfiguration(props.bucket, configuration.value, current.value.format, document.value) && id === request) {
-      notice.value = { text: 'Configuration exported.', tone: 'success' }
-    }
+    if (await bucketsApi.exportConfiguration(props.bucket, section, current.value.format, state.value.draft) &&
+      id === scope && section === configuration.value) operationNotice.value = 'Configuration exported.'
   } catch (failure) {
-    if (id === request) error.value = errorMessage(failure)
+    if (id === scope && section === configuration.value) operationError.value = errorMessage(failure)
   } finally {
-    exporting.value = false
-  }
-}
-
-function review(): void {
-  try {
-    if (schema.value) readXml(document.value, schema.value.root)
-    else readPolicy(document.value)
-    confirm.value = 'write'
-  } catch (failure) {
-    error.value = errorMessage(failure)
+    if (id === scope) exporting.value = false
   }
 }
 
@@ -134,37 +132,58 @@ async function apply(): Promise<void> {
   const action = confirm.value
   confirm.value = undefined
   if (!action) return
-  const id = ++request
-  busy.value = true
-  error.value = ''
-  notice.value = undefined
-  try {
-    if (action === 'bucket') {
+  const id = scope
+  const section = configuration.value
+  if (action === 'bucket') {
+    importing.value = true
+    try {
       await bucketsApi.remove(props.connection, props.bucket)
-      if (id === request) emit('removed')
-      return
+      if (id === scope) {
+        editors.value.discard()
+        importing.value = false
+        emit('removed')
+      }
+    } catch (failure) {
+      if (id === scope) operationError.value = errorMessage(failure)
+    } finally {
+      if (id === scope) importing.value = false
     }
-    const change: ConfigurationChange = action === 'write' ? { action, document: document.value } : { action }
-    await bucketsApi.configure(props.connection, props.bucket, configuration.value, change)
-    if (id !== request) return
-    const reload = load()
-    const reloadId = request
-    await reload
-    if (reloadId === request && !error.value) notice.value = { text: 'Bucket settings updated.', tone: 'success' }
-  } catch (failure) {
-    if (id === request) error.value = errorMessage(failure)
-  } finally {
-    if (id === request) busy.value = false
+    return
   }
+  const change = action === 'write' ? { action, document: state.value.draft } : { action }
+  if (await editors.value.write(section, change) && id === scope) emit('changed')
 }
+
+function toggleRule(index: number, status: string): void {
+  edit(setLifecycleRuleStatus(state.value.draft, index, status === 'Enabled' ? 'Disabled' : 'Enabled'))
+}
+
+defineExpose({
+  dirty, busy,
+  discard: () => editors.value.discard(),
+  refresh: () => editors.value.refreshLoaded(),
+})
 </script>
 
 <template>
-  <div class="stage-panel configuration-panel">
-    <div class="stage-heading"><div><h2>Bucket settings</h2><p>Read and change the settings supported by this endpoint.</p></div><Database :size="20" /></div>
+  <div class="stage-panel configuration-panel bucket-configuration">
+    <div class="stage-heading">
+      <div><h2>Bucket settings</h2><p>{{ bucket }}</p></div>
+      <div v-if="managed" class="panel-actions">
+        <button type="button" :disabled="demo || busy" @click="backup = 'export'"><Download :size="15" /> Back up</button>
+        <button type="button" :disabled="demo || busy" @click="backup = 'restore'"><Upload :size="15" /> Restore</button>
+      </div>
+      <Database v-else :size="20" />
+    </div>
     <div class="configuration-grid">
       <nav aria-label="Bucket settings" class="settings-nav">
-        <button v-for="item in configurations" :key="item.id" :aria-pressed="configuration === item.id" :class="{ active: configuration === item.id }" @click="configuration = item.id">{{ item.label }}</button>
+        <div v-for="group in configurationGroups" :key="group.label" class="bucket-settings-group">
+          <h3>{{ group.label }}</h3>
+          <button v-for="section in group.sections" :key="section" type="button" :aria-pressed="configuration === section"
+            :class="{ active: configuration === section }" @click="configuration = section">
+            <span>{{ configurationLabel(section) }}</span><small v-if="labelFor(section)">{{ labelFor(section) }}</small>
+          </button>
+        </div>
       </nav>
       <FadeRegion>
         <div :key="configuration" class="panel-form configuration-editor">
@@ -172,22 +191,31 @@ async function apply(): Promise<void> {
             <h3>{{ current.label }}</h3>
             <div class="panel-actions">
               <input ref="fileInput" type="file" hidden :accept="`.${current.format.toLowerCase()}`" @change="importFile" />
-              <button type="button" :disabled="busy || demo" @click="fileInput?.click()"><Upload :size="15" /> Import {{ current.format }}</button>
-              <button type="button" :disabled="busy || exporting || !document" @click="exportFile"><Download :size="15" /> Export {{ current.format }}</button>
-              <button class="icon-button" type="button" aria-label="Reload configuration" :disabled="busy" @click="load"><RefreshCw :size="17" /></button>
+              <button type="button" :disabled="state.busy || importing || demo" @click="fileInput?.click()"><Upload :size="15" /> Import {{ current.format }}</button>
+              <button type="button" :disabled="state.busy || exporting || !state.draft" @click="exportFile"><Download :size="15" /> Export {{ current.format }}</button>
+              <button class="icon-button" type="button" aria-label="Reload configuration" :disabled="state.busy" @click="editors.refresh(configuration, true)"><RefreshCw :size="17" /></button>
             </div>
           </div>
-          <Notice v-if="error" tone="error">{{ error }}</Notice>
-          <Notice v-if="notice" :tone="notice.tone">{{ notice.text }}</Notice>
-          <p v-if="busy && !xml && !policy" class="muted" role="status">Reading endpoint configuration…</p>
-          <form class="panel-form" :aria-busy="busy" @submit.prevent="review">
-            <XmlSettingsForm v-if="schema && xml" :parent="xml.documentElement"
-              :fields="schema.fields" :revision="revision" :disabled="busy || demo" @change="updateXml" />
-            <PolicySettingsForm v-else-if="policy" :value="policy" scope="policy" :disabled="busy || demo" @change="updatePolicy" />
+          <Notice v-if="state.reading?.status === 'error'" tone="error">Read failed. {{ state.reading.message }}</Notice>
+          <Notice v-if="state.error || operationError" tone="error">{{ state.error || operationError }}</Notice>
+          <Notice v-if="state.notice || operationNotice" tone="info">{{ state.notice || operationNotice }}</Notice>
+          <p v-if="!state.reading && state.busy" class="muted" role="status">Reading endpoint configuration…</p>
+          <form v-else class="panel-form" :aria-busy="state.busy" @submit.prevent="confirm = 'write'">
+            <div v-if="managed && lifecycleRules.length" class="lifecycle-quick-actions">
+              <div v-for="(rule, index) in lifecycleRules" :key="index">
+                <span>{{ rule.name }} <small class="muted">{{ rule.status }}</small></span>
+                <button v-if="rule.status === 'Enabled' || rule.status === 'Disabled'" type="button" :disabled="state.busy || demo"
+                  @click="toggleRule(index, rule.status)">{{ rule.status === 'Enabled' ? 'Disable' : 'Enable' }}</button>
+              </div>
+            </div>
+            <XmlSettingsForm v-if="schema && xml" :parent="xml.documentElement" :fields="schema.fields"
+              :revision="revision" :disabled="state.busy || demo" @change="updateXml" />
+            <PolicySettingsForm v-else-if="policy" :value="policy" scope="policy" :disabled="state.busy || demo" @change="updatePolicy" />
             <div class="panel-actions configuration-actions">
-              <button v-if="current.example" type="button" :disabled="busy || demo" @click="loadExample"><Braces :size="15" /> Load example</button>
-              <button v-if="current.remove" type="button" :disabled="busy || demo || !original" @click="confirm = 'remove'">Remove setting</button>
-              <button class="primary" type="submit" :disabled="busy || demo || !document || document === original">Apply settings</button>
+              <button v-if="current.example" type="button" :disabled="state.busy || demo" @click="edit(current.example)"><Braces :size="15" /> Load example</button>
+              <button v-if="state.draft !== state.original" type="button" :disabled="state.busy" @click="edit(state.original)">Discard draft</button>
+              <button v-if="current.remove" type="button" :disabled="state.busy || demo || !state.original" @click="confirm = 'remove'">Remove setting</button>
+              <button class="primary" type="submit" :disabled="state.busy || demo || !state.draft || state.draft === state.original || state.reading?.status === 'error'">Apply settings</button>
             </div>
           </form>
         </div>
@@ -196,6 +224,8 @@ async function apply(): Promise<void> {
     <div class="danger-zone"><div><h3>Delete empty bucket</h3><p>Remove the bucket after all objects and versions have been removed.</p></div>
       <button :disabled="demo || busy" class="danger-outline" @click="confirm = 'bucket'"><Trash2 :size="16" /> Delete bucket</button>
     </div>
+    <BucketBackupDialog v-if="backup" :mode="backup" :connection="connection" :bucket="bucket" :editors="editors"
+      @close="backup = undefined" @changed="emit('changed')" />
     <ConfirmDialog v-if="confirm" :title="confirm === 'write' ? `Update ${current.label.toLowerCase()}?` : confirm === 'bucket' ? 'Delete bucket?' : 'Remove configuration?'"
       :description="confirm === 'bucket' ? `${bucket} will be removed from the selected endpoint.` : `This applies to the ${bucket} bucket on the selected connection.`"
       :action="confirm === 'write' ? 'Apply settings' : confirm === 'bucket' ? 'Delete bucket' : 'Remove setting'"

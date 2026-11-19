@@ -1,10 +1,12 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { Activity, ArrowLeft, ArrowRight, ChevronRight, CircleHelp, PanelLeftClose, PanelLeftOpen, Server } from 'lucide-vue-next'
+import { getCurrentWindow } from '@tauri-apps/api/window'
 import { errorMessage, isTauri } from './common/tauri'
 import Sidebar from './components/shell/Sidebar.vue'
 import WindowControls from './components/shell/WindowControls.vue'
 import AppSelect from './components/ui/AppSelect.vue'
+import ConfirmDialog from './components/ui/ConfirmDialog.vue'
 import FadeRegion from './components/ui/FadeRegion.vue'
 import Notice from './components/ui/Notice.vue'
 import AdminWorkspace from './features/administration/components/AdminWorkspace.vue'
@@ -12,10 +14,11 @@ import BrowserWorkspace from './features/browser/components/BrowserWorkspace.vue
 import type { Location } from './features/browser/model/objects'
 import { demoConnection } from './features/browser/model/demo'
 import { useBrowser } from './features/browser/store/browser'
+import BucketRulesWorkspace from './features/bucket/components/BucketRulesWorkspace.vue'
+import ManagerWorkspace from './features/bucket/components/ManagerWorkspace.vue'
 import NewBucketDialog from './features/bucket/components/NewBucketDialog.vue'
 import ConnectionEditor from './features/connection/components/ConnectionEditor.vue'
 import ConnectionsWorkspace from './features/connection/components/ConnectionsWorkspace.vue'
-import ManagerWorkspace from './features/connection/components/ManagerWorkspace.vue'
 import WorkspaceHelp from './features/connection/components/WorkspaceHelp.vue'
 import WorkspacePreferences from './features/connection/components/WorkspacePreferences.vue'
 import { providerNames, type Connection } from './features/connection/model/connection'
@@ -44,6 +47,8 @@ const showTags = ref(window.localStorage.getItem('storeforge.selectorTags') === 
 const startup = ref(window.localStorage.getItem('storeforge.startupContext') ?? '')
 const startError = ref('')
 const browserView = ref<InstanceType<typeof BrowserWorkspace>>()
+const managerView = ref<InstanceType<typeof ManagerWorkspace>>()
+const departure = ref<() => void>()
 const demo = computed(() => connections.activeId === 'demo')
 const contextOptions = computed(() => [
   ...connections.profiles.map(profile => ({ value: profile.id, label: profileLabel(profile) })),
@@ -78,6 +83,9 @@ const resource = computed(() => {
 const windowChrome = (window as Window & { __storeforgeWindowChrome?: 'overlay' | 'custom' }).__storeforgeWindowChrome
 const dragRegion = windowChrome ? 'deep' : undefined
 let timer: number | undefined
+let unlistenClose: (() => void) | undefined
+let closing = false
+let mounted = false
 let previousRunning = new Set<string>()
 let browserContext = ''
 
@@ -95,14 +103,22 @@ watch(() => jobs.jobs, jobList => {
 })
 
 onMounted(() => {
+  mounted = true
   void initialize()
   window.addEventListener('keydown', keydown)
-  if (isTauri()) timer = window.setInterval(() => void jobs.load(), 1200)
+  window.addEventListener('beforeunload', beforeUnload)
+  if (isTauri()) {
+    timer = window.setInterval(() => void jobs.load(), 1200)
+    void watchWindowClose()
+  }
 })
 
 onUnmounted(() => {
+  mounted = false
+  unlistenClose?.()
   if (timer !== undefined) window.clearInterval(timer)
   window.removeEventListener('keydown', keydown)
+  window.removeEventListener('beforeunload', beforeUnload)
 })
 
 function findProfile(id: string): Connection | undefined {
@@ -151,13 +167,72 @@ function synchronize(destination: WorkspaceRoute): void {
   if (destination.workspace === 'browser') void browser.navigate(destination.bucket ?? '', destination.prefix ?? '')
 }
 
+function leavingBucket(action: () => void): void {
+  const detail = route.value.workspace === 'manager' && route.value.page === 'buckets' && route.value.bucket
+  if (detail && managerView.value?.busy) return
+  if (detail && managerView.value?.dirty) departure.value = action
+  else action()
+}
+
+function finishDeparture(): void {
+  const action = departure.value
+  departure.value = undefined
+  managerView.value?.discard()
+  action?.()
+}
+
+function beforeUnload(event: BeforeUnloadEvent): void {
+  if (!closing && managerView.value?.dirty) event.preventDefault()
+}
+
+async function watchWindowClose(): Promise<void> {
+  try {
+    const windowHandle = getCurrentWindow()
+    const unlisten = await windowHandle.onCloseRequested(event => {
+      if (closing || !managerView.value?.dirty && !managerView.value?.busy) return
+      event.preventDefault()
+      leavingBucket(() => {
+        closing = true
+        void closeWindow()
+      })
+    })
+    if (mounted) unlistenClose = unlisten
+    else unlisten()
+  } catch (failure) {
+    if (mounted) startError.value = errorMessage(failure)
+  }
+}
+
+async function closeWindow(): Promise<void> {
+  try {
+    await getCurrentWindow().close()
+  } catch (failure) {
+    closing = false
+    startError.value = errorMessage(failure)
+  }
+}
+
+function openRoute(destination: WorkspaceRoute): void {
+  const current = route.value
+  const sameBucket = current.workspace === 'manager' && current.page === 'buckets' &&
+    destination.workspace === 'manager' && destination.page === 'buckets' &&
+    current.connectionId === destination.connectionId && current.bucket === destination.bucket
+  if (sameBucket) navigation.go(destination)
+  else leavingBucket(() => navigation.go(destination))
+}
+
+function history(direction: 'back' | 'forward'): void {
+  if (direction === 'back' ? navigation.canBack : navigation.canForward) {
+    leavingBucket(() => direction === 'back' ? navigation.back() : navigation.forward())
+  }
+}
+
 function keydown(event: KeyboardEvent): void {
   if (document.querySelector('dialog[open]')) return
   const typing = event.target instanceof HTMLElement && (event.target.matches('input, textarea, [contenteditable]'))
   if (event.altKey && !typing && (event.key === 'ArrowLeft' || event.key === 'ArrowRight')) {
     event.preventDefault()
-    if (event.key === 'ArrowLeft') navigation.back()
-    else navigation.forward()
+    history(event.key === 'ArrowLeft' ? 'back' : 'forward')
     return
   }
   if (route.value.workspace !== 'browser' || !browser.bucket) return
@@ -173,12 +248,12 @@ function go(destination: WorkspaceDestination): void {
   if (destination.workspace === 'browser' && !destination.bucket && browser.bucket) {
     destination = { workspace: 'browser', bucket: browser.bucket, prefix: browser.prefix }
   }
-  navigation.go({ ...destination, connectionId: connections.activeId })
+  openRoute({ ...destination, connectionId: connections.activeId })
 }
 
 function openMonitoringDestination(destination: WorkspaceDestination, connectionId = connections.activeId): void {
   const target = { ...destination, connectionId }
-  if (routeAllowed(target)) navigation.go(target)
+  if (routeAllowed(target)) openRoute(target)
 }
 
 function openWorkspaceRoot(): void {
@@ -189,25 +264,25 @@ function openWorkspaceRoot(): void {
 }
 
 function openDemo(): void {
-  navigation.go(defaultRoute(demoConnection))
+  openRoute(defaultRoute(demoConnection))
 }
 
 function selectContext(id: string): void {
-  if (id !== connections.activeId) navigation.go(defaultRoute(findProfile(id)))
+  if (id !== connections.activeId) openRoute(defaultRoute(findProfile(id)))
 }
 
 function openProfile(profile: Connection): void {
-  navigation.go(defaultRoute(profile))
+  openRoute(defaultRoute(profile))
 }
 
 function openFavorite(location: Location): void {
   const destination: WorkspaceRoute = { workspace: 'browser', connectionId: location.connection, bucket: location.bucket, prefix: location.prefix }
-  if (routeAllowed(destination)) navigation.go(destination)
+  if (routeAllowed(destination)) openRoute(destination)
 }
 
 function openBucket(bucket: string, prefix?: string): void {
   if (!canBrowse.value) return
-  navigation.go({ workspace: 'browser', connectionId: connections.activeId, bucket: bucket || undefined, prefix: prefix || undefined })
+  openRoute({ workspace: 'browser', connectionId: connections.activeId, bucket: bucket || undefined, prefix: prefix || undefined })
 }
 
 function openEditor(value?: Connection): void {
@@ -254,8 +329,8 @@ function showJob(id: string): void {
               <PanelLeftClose v-if="sidebar" :size="18" /><PanelLeftOpen v-else :size="18" />
             </button>
             <div class="history-actions">
-              <button class="icon-button subtle" aria-label="Go back" title="Go back (Alt + Left)" :disabled="!navigation.canBack" @click="navigation.back()"><ArrowLeft :size="17" /></button>
-              <button class="icon-button subtle" aria-label="Go forward" title="Go forward (Alt + Right)" :disabled="!navigation.canForward" @click="navigation.forward()"><ArrowRight :size="17" /></button>
+              <button class="icon-button subtle" aria-label="Go back" title="Go back (Alt + Left)" :disabled="!navigation.canBack" @click="history('back')"><ArrowLeft :size="17" /></button>
+              <button class="icon-button subtle" aria-label="Go forward" title="Go forward (Alt + Right)" :disabled="!navigation.canForward" @click="history('forward')"><ArrowRight :size="17" /></button>
             </div>
           </div>
           <div class="shell-context">
@@ -295,11 +370,14 @@ function showJob(id: string): void {
               :workspace="monitoringRoute.workspace" :pane="monitoringRoute.pane" :metric="monitoringRoute.metric"
               :profile="connections.active" :profiles="connections.profiles" :compact="compact"
               @open="openMonitoringDestination" @create="creatingBucket = true" />
-            <ManagerWorkspace v-else-if="managerRoute?.page === 'buckets' && connections.active"
-              :key="`manager:${connections.contextKey}`" :profile="connections.active" :bucket="managerRoute.bucket" :filter-bucket="managerRoute.filterBucket"
+            <ManagerWorkspace v-else-if="managerRoute?.page === 'buckets' && connections.active" ref="managerView"
+              :key="`manager:${connections.contextKey}`" :profile="connections.active" :bucket="managerRoute.bucket"
               :demo="demo" :browse-available="canBrowse" :compact="compact" @inventory="go({ workspace: 'manager', page: 'buckets' })"
               @inspect="go({ workspace: 'manager', page: 'buckets', bucket: $event })" @browse="openBucket" @job="jobStarted"
               @tools="go({ workspace: 'manager', page: 'tools', bucket: $event })" @create="creatingBucket = true" @connections="go({ workspace: 'admin', page: 'connections' })" />
+            <BucketRulesWorkspace v-else-if="managerRoute?.page === 'featureRules' && connections.active"
+              :key="`rules:${connections.contextKey}`" :connection="connections.active.id"
+              @inspect="go({ workspace: 'manager', page: 'buckets', bucket: $event })" />
             <AdminWorkspace v-else-if="route.workspace === 'cephAdmin' || managerRoute?.page === 'access'"
               :key="`access:${route.workspace}:${connections.contextKey}:${route.workspace === 'cephAdmin' ? route.group ?? '' : ''}:${route.workspace === 'cephAdmin' ? route.bucket ?? '' : ''}`" :scope="route.workspace === 'cephAdmin' ? 'ceph' : 's3'"
               :connection="connections.active" :bucket="route.workspace === 'cephAdmin' ? route.bucket ?? browser.bucket : browser.bucket"
@@ -323,6 +401,9 @@ function showJob(id: string): void {
     </main>
   </div>
   <ConnectionEditor v-if="editor" :profile="editedProfile" :resume="!editedProfile && hasDraft" @close="closeEditor" @saved="connectionSaved" />
+  <ConfirmDialog v-if="departure" title="Discard bucket drafts?"
+    description="Your unsaved configuration or quota changes will be discarded when you leave this bucket."
+    action="Discard drafts" danger @close="departure = undefined" @confirm="finishDeparture" />
   <WorkspaceHelp v-if="help" :workspace="route.workspace" @close="help = false" />
-  <NewBucketDialog v-if="creatingBucket && connections.active && !demo" :connection="connections.active.id" @close="creatingBucket = false" @created="bucketCreated" />
+  <NewBucketDialog v-if="creatingBucket && connections.active && !demo" :profile="connections.active" @close="creatingBucket = false" @created="bucketCreated" />
 </template>

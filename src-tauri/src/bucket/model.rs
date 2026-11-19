@@ -34,3 +34,23 @@ pub enum ConfigurationChange {
     Write(String),
     Remove,
 }
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BucketCreation {
+    pub versioning_error: Option<String>,
+}
+
+#[derive(Deserialize, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BucketQuota {
+    pub enabled: bool,
+    pub max_bytes: String,
+    pub max_objects: String,
+}
+
+#[derive(Deserialize)]
+pub struct BucketQuotaUpdate {
+    pub expected: BucketQuota,
+    pub draft: BucketQuota,
+}
