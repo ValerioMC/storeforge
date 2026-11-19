@@ -6,8 +6,9 @@ import type { Bucket } from '../../bucket/model/bucket'
 import { countPrefix, searchListing } from '../api/listing'
 import { objectsApi } from '../api/objects'
 import { demoKey, demoPrefix } from '../model/demo'
+import type { MetadataDraft, ObjectView } from '../model/inspector'
 import { browserLocationKey, selectedRange, type BrowserProfile } from '../model/listing'
-import { objectId, type Location, type ObjectDetails, type ObjectId, type ObjectRow } from '../model/objects'
+import { objectId, type Location, type ObjectDetails, type ObjectRow, type Tag } from '../model/objects'
 import { defaultPreferences, readFavorites, readListingPreferences, writeFavorite, writeListingPreferences, type ListingPreferences } from '../model/preferences'
 
 type BrowserTab = 'Objects' | 'Versions' | 'Settings'
@@ -15,7 +16,7 @@ type BrowserTab = 'Objects' | 'Versions' | 'Settings'
 interface BrowserView {
   filter: string
   selected: string[]
-  focus: ObjectId | null
+  focus: ObjectView | null
   focusedRow: string | null
   tab: BrowserTab
   preferences: ListingPreferences
@@ -31,7 +32,7 @@ function browserStore(profile: BrowserProfile) {
   const prefix = ref('')
   const rows = ref<ObjectRow[]>([])
   const selected = ref<string[]>([])
-  const focus = ref<ObjectId | null>(null)
+  const focus = ref<ObjectView | null>(null)
   const focusedRow = ref<string | null>(null)
   let selectionAnchor: string | null = null
   const cursor = ref<string | null>(null)
@@ -53,13 +54,15 @@ function browserStore(profile: BrowserProfile) {
   const rowDetails = ref(new Map<string, RowDetails>())
   const prefixCount = ref<PrefixCount>({ status: 'idle' })
   const recent = ref<Location[]>([])
+  const metadataDrafts = ref(new Map<string, MetadataDraft>())
+  const tagDrafts = ref(new Map<string, Tag[]>())
   const favorites = ref(readFavorites())
   let restoring = false
   let detailsRevision = 0
   let countRequest = 0
   const tab = ref<BrowserTab>('Objects')
   const views = new Map<string, BrowserView>()
-  let revision = ''
+  const revision = ref('')
   let bucketRequest = 0
   let rowRequest = 0
 
@@ -112,7 +115,7 @@ function browserStore(profile: BrowserProfile) {
     rememberView()
     bucketRequest++
     connection.value = id
-    revision = contextRevision
+    revision.value = contextRevision
     buckets.value = []
     bucketError.value = ''
     restoreView('', '')
@@ -128,7 +131,7 @@ function browserStore(profile: BrowserProfile) {
   }
 
   function viewKey(name = bucket.value, path = prefix.value): string {
-    return JSON.stringify([connection.value, revision, name, path])
+    return JSON.stringify([connection.value, revision.value, name, path])
   }
 
   function rememberView(): void {
@@ -263,7 +266,7 @@ function browserStore(profile: BrowserProfile) {
   return {
     buckets, bucket, prefix, rows, selected, selectedObjects, focus, focusedRow, cursor, loading, bucketLoading, error, bucketError,
     location, recursive, filter, technical, tab, advanced, options, sort, detailColumns, columnWidths,
-    rowDetails, prefixCount, deletedError, limitReached, recent, favorites, isFavorite,
+    rowDetails, prefixCount, deletedError, limitReached, recent, favorites, isFavorite, revision, metadataDrafts, tagDrafts,
     loadBuckets, changeConnection, navigate, loadRows, toggleSelection, toggleVisible,
     invalidateRowDetails, loadRowDetails, loadPrefixCount, toggleFavorite,
   }

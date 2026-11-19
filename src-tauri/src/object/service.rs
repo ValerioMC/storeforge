@@ -16,11 +16,15 @@ use base64::{Engine, engine::general_purpose::STANDARD};
 use crate::common::error::{AppError, Result, storage_error};
 
 use super::{
-    model::{MetadataUpdate, MultipartUpload, ObjectChange, ObjectDetails, ObjectId, Preview, Tag},
+    model::{
+        MetadataUpdate, MultipartUpload, ObjectChange, ObjectDetails, ObjectId, Preview,
+        PreviewKind, Tag,
+    },
     repository,
 };
 
-const PREVIEW_LIMIT: i64 = 2 * 1024 * 1024;
+const OBJECT_PREVIEW_LIMIT: i64 = 50 * 1024 * 1024;
+const TEXT_PREVIEW_LIMIT: i64 = 64 * 1024;
 
 pub struct ObjectService;
 
@@ -73,45 +77,30 @@ impl ObjectService {
 
     pub async fn preview(client: &Client, object: &ObjectId) -> Result<Preview> {
         let head = repository::head(client, object).await?;
-        let size = head.content_length().unwrap_or_default();
-        let content_type = head
-            .content_type()
-            .unwrap_or("application/octet-stream")
-            .to_owned();
-        if size == 0 {
-            return Ok(Preview {
-                content_type,
-                data: String::new(),
-                truncated: false,
-            });
-        }
-        let mut output = client
-            .get_object()
-            .bucket(&object.bucket)
-            .key(&object.key)
-            .set_version_id(object.version_id.clone())
-            .set_if_match(head.e_tag)
-            .range(format!("bytes=0-{}", PREVIEW_LIMIT - 1))
-            .send()
-            .await
-            .map_err(storage_error)?;
-        let mut bytes = Vec::new();
-        while let Some(chunk) = output
-            .body
-            .try_next()
-            .await
-            .map_err(|error| AppError::Storage(error.to_string()))?
-        {
-            let remaining = PREVIEW_LIMIT as usize - bytes.len();
-            bytes.extend_from_slice(&chunk[..chunk.len().min(remaining)]);
-            if bytes.len() == PREVIEW_LIMIT as usize {
-                break;
-            }
-        }
+        let size = head
+            .content_length()
+            .filter(|size| *size >= 0)
+            .ok_or_else(|| {
+                AppError::Storage("The endpoint did not report the object's size.".into())
+            })?;
+        let content_type = preview_content_type(head.content_type(), &object.key);
+        let kind = preview_kind(&content_type);
+        let oversized = size > OBJECT_PREVIEW_LIMIT;
+        let truncated = !oversized && kind == PreviewKind::Text && size > TEXT_PREVIEW_LIMIT;
+        let data = if oversized || size == 0 {
+            String::new()
+        } else {
+            let length = if truncated { TEXT_PREVIEW_LIMIT } else { size };
+            let range = truncated.then(|| format!("bytes=0-{}", length - 1));
+            let bytes = read_preview(client, object, head.e_tag, range, length as usize).await?;
+            STANDARD.encode(bytes)
+        };
         Ok(Preview {
             content_type,
-            data: STANDARD.encode(bytes),
-            truncated: size > PREVIEW_LIMIT,
+            kind,
+            data,
+            truncated,
+            oversized,
         })
     }
 
@@ -152,11 +141,21 @@ impl ObjectService {
     }
 
     pub async fn change(client: &Client, object: &ObjectId, change: ObjectChange) -> Result<()> {
+        Self::change_with_version(client, object, change)
+            .await
+            .map(|_| ())
+    }
+
+    pub async fn change_with_version(
+        client: &Client,
+        object: &ObjectId,
+        change: ObjectChange,
+    ) -> Result<Option<String>> {
         match change {
-            ObjectChange::Delete => Self::delete(client, object).await,
             ObjectChange::RestoreVersion => {
-                Self::copy(client, object, &object.bucket, &object.key).await
+                return restore_version(client, object).await;
             }
+            ObjectChange::Delete => Self::delete(client, object).await,
             ObjectChange::SetTags { tags } => set_tags(client, object, tags).await,
             ObjectChange::SetMetadata { update } => set_metadata(client, object, update).await,
             ObjectChange::SetAcl { acl } => set_acl(client, object, acl).await,
@@ -167,7 +166,8 @@ impl ObjectService {
             ObjectChange::RestoreArchive { days, tier } => {
                 restore_archive(client, object, days, tier).await
             }
-        }
+        }?;
+        Ok(None)
     }
 
     pub async fn delete(client: &Client, object: &ObjectId) -> Result<()> {
@@ -176,18 +176,6 @@ impl ObjectService {
             .bucket(&object.bucket)
             .key(&object.key)
             .set_version_id(object.version_id.clone())
-            .send()
-            .await
-            .map_err(storage_error)?;
-        Ok(())
-    }
-
-    pub async fn copy(client: &Client, source: &ObjectId, bucket: &str, key: &str) -> Result<()> {
-        client
-            .copy_object()
-            .bucket(bucket)
-            .key(key)
-            .copy_source(repository::copy_source(source))
             .send()
             .await
             .map_err(storage_error)?;
@@ -278,6 +266,92 @@ impl ObjectService {
     }
 }
 
+fn preview_content_type(content_type: Option<&str>, key: &str) -> String {
+    let declared = content_type
+        .and_then(|value| value.split(';').next())
+        .map(|mime| mime.trim().to_ascii_lowercase())
+        .unwrap_or_default();
+    if matches!(
+        declared.as_str(),
+        "" | "application/octet-stream" | "binary/octet-stream"
+    ) {
+        return mime_guess::from_path(key.trim_end())
+            .first_or_octet_stream()
+            .essence_str()
+            .to_owned();
+    }
+    declared
+}
+
+fn preview_kind(content_type: &str) -> PreviewKind {
+    match content_type {
+        "image/png" | "image/jpeg" | "image/webp" | "image/gif" | "image/avif" | "image/bmp" => {
+            PreviewKind::Image
+        }
+        "audio/mpeg" | "audio/mp4" | "audio/aac" | "audio/wav" | "audio/x-wav" | "audio/wave"
+        | "audio/ogg" | "audio/webm" | "audio/flac" => PreviewKind::Audio,
+        "video/mp4" | "video/webm" | "video/ogg" | "video/quicktime" => PreviewKind::Video,
+        "application/pdf" => PreviewKind::Pdf,
+        _ => PreviewKind::Text,
+    }
+}
+
+async fn read_preview(
+    client: &Client,
+    object: &ObjectId,
+    etag: Option<String>,
+    range: Option<String>,
+    length: usize,
+) -> Result<Vec<u8>> {
+    let ranged = range.is_some();
+    let mut output = client
+        .get_object()
+        .bucket(&object.bucket)
+        .key(&object.key)
+        .set_version_id(object.version_id.clone())
+        .set_if_match(etag)
+        .set_range(range)
+        .send()
+        .await
+        .map_err(storage_error)?;
+    let mut bytes = Vec::with_capacity(length);
+    while let Some(chunk) = output
+        .body
+        .try_next()
+        .await
+        .map_err(|error| AppError::Storage(error.to_string()))?
+    {
+        let remaining = length - bytes.len();
+        if !ranged && chunk.len() > remaining {
+            return Err(AppError::Storage(
+                "The object size changed during preview.".into(),
+            ));
+        }
+        bytes.extend_from_slice(&chunk[..chunk.len().min(remaining)]);
+        if ranged && bytes.len() == length {
+            break;
+        }
+    }
+    if bytes.len() != length {
+        return Err(AppError::Storage(
+            "The object size changed during preview.".into(),
+        ));
+    }
+    Ok(bytes)
+}
+
+async fn restore_version(client: &Client, object: &ObjectId) -> Result<Option<String>> {
+    let output = client
+        .copy_object()
+        .bucket(&object.bucket)
+        .key(&object.key)
+        .copy_source(repository::copy_source(object))
+        .send()
+        .await
+        .map_err(storage_error)?;
+    Ok(output.version_id)
+}
+
 fn validate_tags(tags: &[Tag]) -> Result<()> {
     let mut keys = HashSet::new();
     if tags.len() > 10
@@ -332,6 +406,11 @@ async fn set_metadata(client: &Client, object: &ObjectId, update: MetadataUpdate
             "Only the current version supports metadata replacement.".into(),
         ));
     }
+    let expires = update
+        .expires
+        .as_deref()
+        .map(parse_content_expiry)
+        .transpose()?;
     let current = repository::head(client, object).await?;
     client
         .copy_object()
@@ -343,9 +422,10 @@ async fn set_metadata(client: &Client, object: &ObjectId, update: MetadataUpdate
         .set_metadata(Some(update.metadata))
         .set_content_type(update.content_type)
         .set_cache_control(update.cache_control)
-        .set_content_disposition(current.content_disposition)
-        .set_content_encoding(current.content_encoding)
-        .set_content_language(current.content_language)
+        .set_content_disposition(update.content_disposition)
+        .set_content_encoding(update.content_encoding)
+        .set_content_language(update.content_language)
+        .set_expires(expires)
         .set_website_redirect_location(current.website_redirect_location)
         .set_storage_class(current.storage_class)
         .set_server_side_encryption(current.server_side_encryption)
@@ -354,6 +434,14 @@ async fn set_metadata(client: &Client, object: &ObjectId, update: MetadataUpdate
         .await
         .map_err(storage_error)?;
     Ok(())
+}
+
+fn parse_content_expiry(value: &str) -> Result<DateTime> {
+    DateTime::from_str(value, DateTimeFormat::HttpDate)
+        .or_else(|_| DateTime::from_str(value, DateTimeFormat::DateTime))
+        .map_err(|_| {
+            AppError::Invalid("Use an HTTP date or an ISO 8601 timestamp for Expires.".into())
+        })
 }
 
 async fn set_acl(client: &Client, object: &ObjectId, acl: String) -> Result<()> {

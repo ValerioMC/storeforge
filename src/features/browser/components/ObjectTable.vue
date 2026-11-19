@@ -1,16 +1,16 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch, type ComponentPublicInstance } from 'vue'
-import { ArrowDown, ArrowUp, ChevronRight, File, FileCode2, FileImage, FileJson2, FileText, Folder, Table2 } from 'lucide-vue-next'
+import { ArrowDown, ArrowUp, Ellipsis, File, FileCode2, FileImage, FileJson2, FileText, Folder, Table2 } from 'lucide-vue-next'
 import { formatDate, formatSize } from '../../../common/format'
 import { type ResizableColumn, type SortColumn } from '../model/listing'
 import { displayName, type ObjectRow } from '../model/objects'
 import type { BrowserStore } from '../store/browser'
 
 const props = defineProps<{ rows: ObjectRow[]; browser: BrowserStore; compact: boolean }>()
-const emit = defineEmits<{ open: [row: ObjectRow]; next: []; sort: [column: SortColumn] }>()
+const emit = defineEmits<{ open: [row: ObjectRow]; menu: [row: ObjectRow, event: MouseEvent]; next: []; sort: [column: SortColumn] }>()
 const browser = computed(() => props.browser)
 const visible = ref(new Set<string>())
-const elements = new Map<Element, string>()
+const elements = new Map<HTMLElement, ObjectRow>()
 let observer: IntersectionObserver | undefined
 const selectable = computed(() => props.rows.filter(row => !row.folder && !row.deleteMarker).map(row => row.key))
 const allSelected = computed(() => selectable.value.length > 0 && selectable.value.every(key => browser.value.selected.includes(key)))
@@ -36,31 +36,42 @@ onMounted(() => {
   if (typeof IntersectionObserver !== 'function') return
   observer = new IntersectionObserver(entries => {
     for (const entry of entries) {
-      const key = elements.get(entry.target)
-      if (key === undefined) continue
+      const row = entry.target instanceof HTMLElement ? elements.get(entry.target) : undefined
+      if (!row) continue
+      const key = row.key
       if (entry.isIntersecting) visible.value.add(key)
       else visible.value.delete(key)
     }
   })
-  for (const element of elements.keys()) observer.observe(element)
+  for (const [element, row] of elements) if (!row.folder && !row.deleteMarker) observer.observe(element)
 })
 
 onBeforeUnmount(() => observer?.disconnect())
 
-function observeRow(key: string, element: Element | ComponentPublicInstance | null): void {
+defineExpose({ focusRow })
+
+function observeRow(row: ObjectRow, element: Element | ComponentPublicInstance | null): void {
   if (!(element instanceof HTMLElement)) {
-    for (const [previous, observedKey] of elements) {
-      if (observedKey !== key) continue
+    for (const [previous, observed] of elements) {
+      if (observed.key !== row.key || observed.folder !== row.folder || observed.deleteMarker !== row.deleteMarker) continue
       observer?.unobserve(previous)
       elements.delete(previous)
     }
-    visible.value.delete(key)
+    if (!row.folder && !row.deleteMarker) visible.value.delete(row.key)
     return
   }
   if (elements.has(element)) return
-  elements.set(element, key)
+  elements.set(element, row)
+  if (row.folder || row.deleteMarker) return
   observer?.observe(element)
-  if (typeof IntersectionObserver !== 'function') visible.value.add(key)
+  if (typeof IntersectionObserver !== 'function') visible.value.add(row.key)
+}
+
+function focusRow(key: string, folder: boolean): boolean {
+  const element = [...elements].find(([, row]) => row.key === key && row.folder === folder)?.[0]
+  const button = element?.querySelector<HTMLButtonElement>('.object-name')
+  button?.focus()
+  return !!button && document.activeElement === button
 }
 
 function loadVisible(): void {
@@ -169,9 +180,9 @@ function cell(row: ObjectRow, column: ResizableColumn): string {
       </thead>
       <tbody>
         <tr v-for="row in rows" :key="JSON.stringify([row.folder, row.key, row.deleteMarker])"
-          :ref="element => { if (!row.folder && !row.deleteMarker) observeRow(row.key, element) }"
+          :ref="element => observeRow(row, element)"
           :class="{ focused: browser.focusedRow === row.key, opened: browser.focus?.key === row.key && !row.folder, checked: browser.selected.includes(row.key) }"
-          @focusin="browser.focusedRow = row.key" @click="emit('open', row)">
+          @focusin="browser.focusedRow = row.key" @click="emit('open', row)" @contextmenu.prevent.stop="emit('menu', row, $event)">
           <td><input v-if="!row.folder && !row.deleteMarker" type="checkbox" :aria-label="`Select ${row.key}`" :checked="browser.selected.includes(row.key)"
             @click.stop="browser.toggleSelection(row.key, selectable, $event.shiftKey)" /></td>
           <td>
@@ -181,7 +192,7 @@ function cell(row: ObjectRow, column: ResizableColumn): string {
             </button>
           </td>
           <td v-for="column in columns.slice(1)" :key="column" class="muted" :title="cell(row, column)">{{ cell(row, column) }}</td>
-          <td class="row-chevron"><ChevronRight :size="15" aria-hidden="true" /></td>
+          <td class="row-chevron"><button class="subtle row-actions" :aria-label="'Actions for ' + row.key" aria-haspopup="true" @click.stop="emit('menu', row, $event)"><Ellipsis :size="15" /></button></td>
         </tr>
       </tbody>
     </table>
@@ -191,6 +202,7 @@ function cell(row: ObjectRow, column: ResizableColumn): string {
 
 <style scoped>
 th { position: relative; }
+.row-actions { min-width: 22px; min-height: 25px; padding: 0; }
 .column-resize {
   position: absolute;
   inset: 0 0 0 auto;
@@ -203,5 +215,5 @@ th { position: relative; }
   touch-action: none;
 }
 .column-resize:hover, .column-resize:focus-visible { border-right: 2px solid var(--accent); }
-.object-table tr.opened td:first-child { box-shadow: inset 2px 0 var(--accent); }
+.object-table tr.opened td:first-child { box-shadow: inset 1px 0 var(--accent); }
 </style>

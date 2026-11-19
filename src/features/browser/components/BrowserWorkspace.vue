@@ -14,20 +14,23 @@ import { workspaceAvailable } from '../../connection/model/workspace'
 import { useConnections } from '../../connection/store/connections'
 import { useWorkspaceNavigation } from '../../connection/store/workspace-navigation'
 import { readObjectPages } from '../api/listing'
+import type { VerifiedVersion } from '../api/versions'
 import { useObjectActions } from '../composables/useObjectActions'
+import { neighboringRow, type InspectorTab, type MetadataDraft, type ObjectView } from '../model/inspector'
 import { folderPrefix, type SortColumn } from '../model/listing'
-import { objectId, parentPrefix, type Location, type ObjectId, type ObjectRow, type Tag } from '../model/objects'
+import { objectId, parentPrefix, type Location, type ObjectId, type ObjectRow, type ObjectVersion, type Tag } from '../model/objects'
 import { useBrowser, useEmbeddedBrowser } from '../store/browser'
 import BrowserFavorites from './BrowserFavorites.vue'
 import BrowserFolderTree from './BrowserFolderTree.vue'
 import BrowserListingOptions from './BrowserListingOptions.vue'
 import FolderDialog from './FolderDialog.vue'
 import ObjectInspector from './ObjectInspector.vue'
+import ObjectRowMenu from './ObjectRowMenu.vue'
 import ObjectTable from './ObjectTable.vue'
 import TagEditor from './TagEditor.vue'
 import VersionList from './VersionList.vue'
 
-const props = defineProps<{ demo: boolean; compact: boolean; embedded?: { connection: string; revision?: string; bucket: string } }>()
+const props = defineProps<{ demo: boolean; compact: boolean; embedded?: { connection: string; revision?: string | null; bucket: string } }>()
 const emit = defineEmits<{ add: []; demo: []; createBucket: []; navigate: [bucket: string, prefix?: string]; favorite: [location: Location]; tools: []; job: [id: string] }>()
 const browser = props.embedded ? useEmbeddedBrowser() : useBrowser()
 const navigation = useWorkspaceNavigation()
@@ -49,11 +52,18 @@ const pathSuggestions = ref<string[]>([])
 const suggestionsError = ref('')
 const pathDetails = ref(false)
 const searchError = ref('')
-let restoreSearchFocus = false
+const inspector = ref<InstanceType<typeof ObjectInspector>>()
+const objectTable = ref<InstanceType<typeof ObjectTable>>()
+const versionsTab = ref<HTMLButtonElement>()
+const rowMenu = ref<{ row: ObjectRow; x: number; y: number }>()
+let returnFocus: (() => void) | undefined
+let versionOpener: HTMLElement | undefined
 const { clipboard, failure, notice, run, enqueue, upload, download, archive, stage, paste } = useObjectActions(id => emit('job', id))
 
 const rows = computed(() => browser.rows)
-const listingLocation = computed(() => JSON.stringify([connections.contextKey, browser.bucket, browser.prefix]))
+const listingLocation = computed(() => JSON.stringify([browser.location.connection, browser.revision, browser.bucket, browser.prefix]))
+const previousObject = computed(() => neighboringObject(-1))
+const nextObject = computed(() => neighboringObject(1))
 const recents = computed(() => browser.recent.filter(location => location.connection === browser.location.connection &&
   location.bucket === browser.bucket && location.prefix !== browser.prefix).map(location => location.prefix))
 const suggestedPaths = computed(() => [...new Set([...pathSuggestions.value, ...recents.value.filter(path => path.startsWith(pathDraft.value))])].slice(0, 8))
@@ -84,6 +94,9 @@ watch(() => connections.contextKey, () => {
   pasteReview.value = false
 }, { flush: 'sync' })
 watch(listingLocation, () => {
+  rowMenu.value = undefined
+  returnFocus = undefined
+  versionOpener = undefined
   editPath.value = false
   pathDetails.value = false
   searchError.value = ''
@@ -94,7 +107,7 @@ watch(() => props.embedded, async (target, _, cleanup) => {
   cleanup(() => { current = false })
   historyIndex.value = 0
   embeddedHistory.value = ['']
-  await browser.changeConnection(target.connection, target.revision)
+  await browser.changeConnection(target.connection, target.revision ?? undefined)
   if (current) await browser.navigate(target.bucket)
 }, { immediate: true })
 watch([pathDraft, editPath], ([draft, open], _, cleanup) => {
@@ -103,8 +116,10 @@ watch([pathDraft, editPath], ([draft, open], _, cleanup) => {
   const timer = window.setTimeout(() => void suggestPrefixes(draft, () => current), 180)
   cleanup(() => { current = false; window.clearTimeout(timer) })
 })
-onDeactivated(() => { editPath.value = false })
-watch(tab, value => { if (value !== 'Objects') browser.focus = null })
+onDeactivated(() => {
+  editPath.value = false
+  rowMenu.value = undefined
+})
 
 defineExpose({
   focusSearch,
@@ -116,26 +131,148 @@ function focusSearch(): void {
 }
 
 function closeInspector(): void {
-  if (!browser.focus) return
-  restoreSearchFocus = true
-  browser.focus = null
+  const view = browser.focus
+  if (!view) return
+  leaveInspector(() => {
+    returnFocus = tab.value === 'Objects'
+      ? () => focusObjectRow(view.key)
+      : focusVersionOpener
+    browser.focus = null
+  })
+}
+
+function focusVersionOpener(): void {
+  if (versionOpener?.isConnected) versionOpener.focus()
+  else versionsTab.value?.focus()
 }
 
 function restoreInspectorFocus(): void {
-  if (!restoreSearchFocus) return
-  restoreSearchFocus = false
-  if (!browser.focus) focusSearch()
+  if (!browser.focus) returnFocus?.()
+  returnFocus = undefined
 }
 
-function openRow(row: ObjectRow): void {
-  if (row.folder) {
-    navigate(browser.bucket, row.key)
-  } else {
-    browser.focus = objectId(browser.bucket, row.key, row.deleteMarker ?? null)
+function leaveInspector(action: () => void): void {
+  if (browser.focus && inspector.value) inspector.value.requestExit(action)
+  else action()
+}
+
+function focusObjectRow(key: string, folder = false): void {
+  if (!objectTable.value?.focusRow(key, folder)) focusSearch()
+}
+
+function neighboringObject(direction: -1 | 1): ObjectRow | undefined {
+  if (tab.value === 'Objects' && browser.focus) return neighboringRow(rows.value, browser.focus, direction)
+}
+
+function moveObject(direction: -1 | 1): void {
+  const row = neighboringObject(direction)
+  if (row) openRow(row)
+}
+
+function openRow(row: ObjectRow, initialTab?: InspectorTab): void {
+  if (row.folder) navigate(browser.bucket, row.key)
+  else openObject({ ...objectId(browser.bucket, row.key, row.deleteMarker ?? null), deleted: row.deleteMarker !== undefined, initialTab })
+}
+
+function openVersion(version: ObjectVersion): void {
+  versionOpener = document.activeElement instanceof HTMLElement ? document.activeElement : undefined
+  openObject(objectId(browser.bucket, version.key, version.versionId))
+}
+
+function openObject(view: ObjectView): void {
+  const current = browser.focus
+  if (current?.key === view.key && current.versionId === view.versionId && !!current.deleted === !!view.deleted) {
+    if (view.initialTab) inspector.value?.openTab(view.initialTab)
+    inspector.value?.focusHeader()
+    return
   }
+  leaveInspector(() => {
+    browser.focus = view
+    void nextTick(() => inspector.value?.focusHeader())
+  })
+}
+
+function changeTab(next: typeof tab.value): void {
+  if (tab.value === next) return
+  leaveInspector(() => {
+    browser.focus = null
+    tab.value = next
+  })
+}
+
+function openRowMenu(row: ObjectRow, event: MouseEvent): void {
+  const anchor = event.target instanceof Element ? event.target.closest('.row-actions')?.getBoundingClientRect() : undefined
+  rowMenu.value = { row, x: anchor?.left ?? event.clientX, y: anchor?.bottom ?? event.clientY }
+}
+
+function closeRowMenu(restoreFocus = false): void {
+  const row = rowMenu.value?.row
+  rowMenu.value = undefined
+  if (restoreFocus && row) focusObjectRow(row.key, row.folder)
+}
+
+function actOnRow(action: (row: ObjectRow) => void): void {
+  const row = rowMenu.value?.row
+  closeRowMenu(true)
+  if (row) action(row)
+}
+
+function openMenuRow(initialTab?: InspectorTab): void {
+  actOnRow(row => openRow(row, initialTab))
+}
+
+function downloadMenuRow(): void {
+  actOnRow(row => void download(browser.location.connection, [objectId(browser.bucket, row.key)]))
+}
+
+function copyMenuRow(): void {
+  actOnRow(row => void run(async () => {
+    await navigator.clipboard.writeText(row.key)
+    notice.value = row.folder ? 'Prefix copied.' : 'Object key copied.'
+  }))
+}
+
+function saveMetadataDraft(key: string, draft?: MetadataDraft): void {
+  if (draft) browser.metadataDrafts.set(key, draft)
+  else browser.metadataDrafts.delete(key)
+}
+
+function saveTagDraft(key: string, draft?: Tag[]): void {
+  if (draft) browser.tagDrafts.set(key, draft)
+  else browser.tagDrafts.delete(key)
+}
+
+function objectChanged(): void {
+  browser.invalidateRowDetails()
+  void browser.loadRows()
+}
+
+function versionChanged(state: VerifiedVersion): void {
+  const view = browser.focus
+  if (view?.deleted && view.key === state.key && view.versionId === state.removedVersionId) {
+    const latest = state.latest
+    if (latest) {
+      const next = objectId(view.bucket, view.key, latest.deleteMarker ? latest.versionId : null)
+      browser.focus = { ...next, deleted: latest.deleteMarker, initialTab: 'Versions' }
+    } else {
+      closeInspector()
+    }
+  } else if (view && view.key === state.key && view.versionId === state.removedVersionId) {
+    closeInspector()
+  }
+  objectChanged()
 }
 
 function navigate(bucket: string, prefix = ''): void {
+  if (bucket === browser.bucket && prefix === browser.prefix) return
+  leaveInspector(() => navigateToPath(bucket, prefix))
+}
+
+function openFavorite(location: Location): void {
+  leaveInspector(() => emit('favorite', location))
+}
+
+function navigateToPath(bucket: string, prefix: string): void {
   if (!props.embedded) {
     emit('navigate', bucket, prefix)
     return
@@ -147,6 +284,10 @@ function navigate(bucket: string, prefix = ''): void {
 }
 
 function moveHistory(direction: -1 | 1): void {
+  leaveInspector(() => followHistory(direction))
+}
+
+function followHistory(direction: -1 | 1): void {
   if (!props.embedded) {
     if (direction < 0) navigation.back()
     else navigation.forward()
@@ -206,20 +347,25 @@ function sortBy(column: SortColumn): void {
 }
 
 function beginDelete(objects: ObjectId[]): void {
-  deleteItems.value = objects
+  if (browser.focus && includesObject(objects, browser.focus)) leaveInspector(() => { deleteItems.value = objects })
+  else deleteItems.value = objects
+}
+
+function includesObject(objects: ObjectId[], current: ObjectId): boolean {
+  return objects.some(object => object.bucket === current.bucket && object.key === current.key && object.versionId === current.versionId)
 }
 
 async function remove(): Promise<void> {
   const objects = deleteItems.value
   deleteItems.value = []
   if (!objects.length) return
-  const context = connections.contextKey
+  const context = listingLocation.value
   const connection = browser.location.connection
   await run(async () => {
     await enqueue({ kind: 'delete', connection, objects })
-    if (connections.contextKey === context) {
-      browser.selected = []
-      browser.focus = null
+    if (listingLocation.value === context) {
+      browser.selected = browser.selected.filter(key => !includesObject(objects, objectId(browser.bucket, key)))
+      if (browser.focus && includesObject(objects, browser.focus)) closeInspector()
     }
   })
 }
@@ -284,9 +430,9 @@ async function copyPath(): Promise<void> {
             </header>
 
             <nav v-if="!embedded" class="workspace-tabs" aria-label="Bucket workspace">
-              <button :class="{ active: tab === 'Objects' }" :aria-pressed="tab === 'Objects'" @click="tab = 'Objects'"><Folder :size="16" />Objects <span class="tab-count">{{ browser.rows.length }}</span></button>
-              <button :class="{ active: tab === 'Versions' }" :aria-pressed="tab === 'Versions'" @click="tab = 'Versions'"><Layers3 :size="16" />Versions</button>
-              <button :class="{ active: tab === 'Settings' }" :aria-pressed="tab === 'Settings'" @click="tab = 'Settings'"><Settings2 :size="16" />Bucket settings</button>
+              <button :class="{ active: tab === 'Objects' }" :aria-pressed="tab === 'Objects'" @click="changeTab('Objects')"><Folder :size="16" />Objects <span class="tab-count">{{ browser.rows.length }}</span></button>
+              <button ref="versionsTab" :class="{ active: tab === 'Versions' }" :aria-pressed="tab === 'Versions'" @click="changeTab('Versions')"><Layers3 :size="16" />Versions</button>
+              <button :class="{ active: tab === 'Settings' }" :aria-pressed="tab === 'Settings'" @click="changeTab('Settings')"><Settings2 :size="16" />Bucket settings</button>
             </nav>
 
             <Notice v-if="failure" tone="error">{{ failure }}</Notice>
@@ -332,7 +478,7 @@ async function copyPath(): Promise<void> {
                 </div>
                 <div class="browser-path-tools">
                   <BrowserFolderTree :key="connections.contextKey" :connection="browser.location.connection" :bucket="browser.bucket" :prefix="browser.prefix" @navigate="navigate(browser.bucket, $event)" />
-                  <BrowserFavorites v-if="!embedded" :favorites="browser.favorites" @open="emit('favorite', $event)" @remove="browser.toggleFavorite($event)" />
+                  <BrowserFavorites v-if="!embedded" :favorites="browser.favorites" @open="openFavorite" @remove="browser.toggleFavorite($event)" />
                 </div>
                 <div v-if="pathDetails" class="browser-path-details">
                   <dl>
@@ -369,7 +515,7 @@ async function copyPath(): Promise<void> {
                     <Notice v-if="browser.error" tone="error">{{ browser.error }}</Notice>
                     <Notice v-if="browser.deletedError" tone="error">Deleted objects unavailable. {{ browser.deletedError }}</Notice>
                     <p v-if="browser.loading" class="loading-line" role="status">Reading objects…</p>
-                    <ObjectTable v-if="rows.length" :browser="browser" :rows="rows" :compact="compact" @open="openRow" @next="browser.loadRows(true)" @sort="sortBy" />
+                    <ObjectTable v-if="rows.length" ref="objectTable" :browser="browser" :rows="rows" :compact="compact" @open="openRow" @menu="openRowMenu" @next="browser.loadRows(true)" @sort="sortBy" />
                     <EmptyState v-else-if="!browser.error && !browser.loading" :icon="Folder" :title="filter ? 'No matching objects' : 'This prefix is empty'"
                       :description="filter ? 'Try another search or clear the search text.' : 'Create a folder or upload files to this location.'">
                       <button v-if="filter" @click="clearFilter">Clear filter</button>
@@ -379,8 +525,8 @@ async function copyPath(): Promise<void> {
                   </div>
                 </FadeRegion>
               </div>
-              <VersionList v-else-if="tab === 'Versions'" :connection="browser.location.connection" :bucket="browser.bucket" :prefix="browser.prefix" :exact="false" :demo="demo"
-                @download="download(browser.location.connection, [$event])" @changed="browser.loadRows()" />
+              <VersionList v-else-if="tab === 'Versions'" :connection="browser.location.connection" :revision="browser.revision" :bucket="browser.bucket" :prefix="browser.prefix" :exact="false" :demo="demo"
+                @download="download(browser.location.connection, [$event])" @view="openVersion" @changed="versionChanged" />
               <BucketSettings v-else :connection="browser.location.connection" :bucket="browser.bucket" :demo="demo" @removed="removeBucket" />
             </FadeRegion>
           </div>
@@ -390,8 +536,11 @@ async function copyPath(): Promise<void> {
           </footer>
         </section>
         <FadeRegion @after-leave="restoreInspectorFocus">
-          <ObjectInspector v-if="browser.focus && tab === 'Objects'" :connection="browser.location.connection" :object="browser.focus" :demo="demo"
-            @close="closeInspector" @download="download(browser.location.connection, [$event])" @changed="browser.loadRows()" @remove="beginDelete([$event])" />
+          <ObjectInspector v-if="browser.focus && tab !== 'Settings'" ref="inspector" :connection="browser.location.connection" :revision="browser.revision"
+            :object="browser.focus" :deleted="browser.focus.deleted" :initial-tab="browser.focus.initialTab" :demo="demo"
+            :metadata-drafts="browser.metadataDrafts" :tag-drafts="browser.tagDrafts" :has-previous="!!previousObject" :has-next="!!nextObject"
+            @close="closeInspector" @move="moveObject" @download="download(browser.location.connection, [$event])" @changed="objectChanged"
+            @version-changed="versionChanged" @remove="beginDelete([$event])" @metadata-draft="saveMetadataDraft" @tag-draft="saveTagDraft" />
         </FadeRegion>
       </div>
       <section v-else class="workspace-page start-page">
@@ -414,6 +563,8 @@ async function copyPath(): Promise<void> {
         </EmptyState>
       </section>
     </FadeRegion>
+
+    <ObjectRowMenu v-if="rowMenu" v-bind="rowMenu" :demo="demo" @close="closeRowMenu" @open="openMenuRow" @download="downloadMenuRow" @copy="copyMenuRow" />
 
     <FolderDialog v-if="folder" :location="browser.location" @close="folder = false" @created="folder = false; browser.loadRows()" />
     <Modal v-if="bulkTags" title="Replace tags on selected objects" @close="bulkTags = false">

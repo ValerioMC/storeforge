@@ -114,7 +114,7 @@ pub async fn change_object(
     connection: Uuid,
     object: ObjectId,
     change: ObjectChange,
-) -> Result<()> {
+) -> Result<Option<String>> {
     let action = match &change {
         ObjectChange::Delete => "Delete object or version",
         ObjectChange::RestoreVersion => "Restore object version",
@@ -125,7 +125,9 @@ pub async fn change_object(
         ObjectChange::Retention { .. } => "Change object retention",
         ObjectChange::RestoreArchive { .. } => "Request archive restore",
     };
-    let result = ObjectService::change(&connections.session(connection)?.s3, &object, change).await;
+    let result =
+        ObjectService::change_with_version(&connections.session(connection)?.s3, &object, change)
+            .await;
     audit.record(
         connection,
         action,

@@ -15,11 +15,11 @@ export const objectsApi = {
   tags: (connection: string, object: ObjectId) => connection === 'demo' ? Promise.resolve([{ key: 'dataset', value: 'telemetry' }, { key: 'review', value: 'verified' }]) : desktop<Tag[]>('object_tags', { connection, object }),
   acl: (connection: string, object: ObjectId) => connection === 'demo' ? Promise.resolve(['FULL_CONTROL · asteria-operations']) : desktop<string[]>('object_acl', { connection, object }),
   preview: (connection: string, object: ObjectId) => connection === 'demo'
-    ? Promise.resolve({ contentType: 'text/csv', data: btoa('timestamp,station,signal_dbm\n09:18:00,kiruna,-92\n09:19:00,kiruna,-87\n09:20:00,kiruna,-86'), truncated: false })
+    ? Promise.resolve<Preview>({ contentType: 'text/csv', kind: 'text', oversized: false, data: btoa('timestamp,station,signal_dbm\n09:18:00,kiruna,-92\n09:19:00,kiruna,-87\n09:20:00,kiruna,-86'), truncated: false })
     : desktop<Preview>('preview_object', { connection, object }),
   share: (connection: string, object: ObjectId, minutes: number) => desktop<string>('share_object', { connection, object, minutes }),
   folder: (connection: string, bucket: string, key: string) => desktop<void>('create_folder', { connection, bucket, key }),
-  change: (connection: string, object: ObjectId, change: ObjectChange) => desktop<void>('change_object', { connection, object, change }),
+  change: (connection: string, object: ObjectId, change: ObjectChange) => desktop<string | null>('change_object', { connection, object, change }),
   multipart: (location: Location) => desktop<MultipartUpload[]>('list_multipart', { ...location }),
   abortMultipart: (connection: string, bucket: string, key: string, uploadId: string) => desktop<void>('abort_multipart', { connection, bucket, key, uploadId }),
 }
