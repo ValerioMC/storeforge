@@ -22,6 +22,16 @@ const running = ref(0)
 const fixedWidths: Record<ResizableColumn, number> = {
   name: 150, type: 62, size: 66, modified: 108, storageClass: 112, contentType: 150, versionId: 130, etag: 130,
 }
+const fluidWidths: Record<ResizableColumn, { minimum: number; share: number; maximum: number }> = {
+  name: { minimum: 150, share: 20, maximum: 720 },
+  type: { minimum: 62, share: 5.5, maximum: 132 },
+  size: { minimum: 66, share: 5.5, maximum: 132 },
+  modified: { minimum: 108, share: 8, maximum: 190 },
+  storageClass: { minimum: 112, share: 8, maximum: 190 },
+  contentType: { minimum: 150, share: 10, maximum: 260 },
+  versionId: { minimum: 130, share: 10, maximum: 260 },
+  etag: { minimum: 130, share: 10, maximum: 260 },
+}
 const labels: Record<ResizableColumn, string> = {
   name: 'Name', type: 'Type', size: 'Size', modified: 'Modified', storageClass: 'Storage class',
   contentType: 'Content type', versionId: 'Version ID', etag: 'ETag',
@@ -124,7 +134,10 @@ function columnWidth(column: ResizableColumn): number {
 
 function widthStyle(column: ResizableColumn): { width?: string } {
   if (column === 'name' && browser.value.columnWidths.name === undefined) return {}
-  return { width: columnWidth(column) + 'px' }
+  const resized = browser.value.columnWidths[column]
+  if (resized !== undefined) return { width: resized + 'px' }
+  const { minimum, share, maximum } = fluidWidths[column]
+  return { width: `clamp(${minimum}px, ${share}vw, ${maximum}px)` }
 }
 
 function setWidth(column: ResizableColumn, width: number): void {

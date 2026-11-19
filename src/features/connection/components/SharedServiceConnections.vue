@@ -222,7 +222,7 @@ function disconnect(remove = false): void {
 </template>
 
 <style scoped>
-.shared-services { display: grid; gap: 10px; }
+.shared-services { display: grid; gap: 10px; margin-top: 20px; }
 .settings-toolbar { flex-wrap: wrap; }
 .settings-toolbar h2 { margin: 0; font-size: 17px; }
 .settings-toolbar p, .settings-description p { overflow-wrap: anywhere; }

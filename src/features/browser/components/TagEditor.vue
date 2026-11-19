@@ -3,13 +3,14 @@ import { computed, ref, watch } from 'vue'
 import { Plus, X } from 'lucide-vue-next'
 import type { Tag } from '../model/objects'
 
-const props = defineProps<{ tags: Tag[]; disabled?: boolean }>()
-const emit = defineEmits<{ save: [tags: Tag[]] }>()
+const props = defineProps<{ tags: Tag[]; initialDraft?: Tag[]; disabled?: boolean }>()
+const emit = defineEmits<{ save: [tags: Tag[]]; draft: [tags: Tag[] | undefined] }>()
 const tags = ref<Tag[]>([])
 const valid = computed(() => tags.value.every(tag => tag.key.length > 0) && new Set(tags.value.map(tag => tag.key)).size === tags.value.length)
 const changed = computed(() => JSON.stringify(tags.value) !== JSON.stringify(props.tags))
 
-watch(() => props.tags, value => { tags.value = value.map(tag => ({ ...tag })) }, { immediate: true })
+watch(() => props.tags, value => { tags.value = (props.initialDraft ?? value).map(tag => ({ ...tag })) }, { immediate: true })
+watch(tags, value => emit('draft', changed.value ? value.map(tag => ({ ...tag })) : undefined), { deep: true })
 
 function add(): void {
   if (tags.value.length < 10) tags.value.push({ key: '', value: '' })

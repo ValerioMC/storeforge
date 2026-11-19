@@ -8,7 +8,10 @@ use aws_sigv4::sign::v4;
 use reqwest::{Method, StatusCode, header};
 use url::Url;
 
-use crate::connection::{model::Connection, service::Session};
+use crate::connection::{
+    model::Connection,
+    service::{Session, normalize_proxy_url},
+};
 
 use super::error::{AppError, Result};
 
@@ -24,6 +27,10 @@ pub fn endpoint_client(profile: &Connection, timeout: Duration) -> Result<reqwes
     let mut builder = reqwest::Client::builder()
         .redirect(reqwest::redirect::Policy::none())
         .timeout(timeout);
+    let proxy = normalize_proxy_url(&profile.settings.proxy_url)?;
+    if !proxy.is_empty() {
+        builder = builder.proxy(reqwest::Proxy::all(proxy).map_err(transport_error)?);
+    }
     if !profile.settings.ca_certificate.trim().is_empty() {
         let certificates =
             reqwest::Certificate::from_pem_bundle(profile.settings.ca_certificate.as_bytes())

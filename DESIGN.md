@@ -151,7 +151,7 @@ The system sans stack supports native desktop rendering. Use the monospace stack
 
 ## Layout
 
-The desktop shell pairs a 230px connection rail with a flexible work area. A 59px workspace bar and a 29px status bar frame the independently scrolling content. Opening an object adds a 312px inspector alongside the listing at wide widths.
+The desktop shell pairs a connection rail that scales from 208px to 288px with a flexible work area. A 59px workspace bar and a 29px status bar frame the independently scrolling content. Workspace pages fill the work area in width and height with no maximum width; gutters scale with the viewport and the primary surface stretches to the bottom. Opening an object adds an inspector that scales from 280px to 460px alongside the listing at wide widths.
 
 The rail and inspector narrow at 1,210px and 1,020px. At 865px and below, an open inspector takes the full work area and hides the listing while preserving the rail. At 660px and below, the shell uses one column and the rail overlays the workspace when open.
 

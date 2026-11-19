@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import AppSelect from '../../../components/ui/AppSelect.vue'
-import { defaultOptions, type DetailColumn, type SortColumn } from '../model/listing'
+import { defaultOptions, type SortColumn } from '../model/listing'
 import type { BrowserStore } from '../store/browser'
 
 const props = defineProps<{ browser: BrowserStore }>()
@@ -17,9 +17,6 @@ const storageClasses = computed(() => [
 const sorts: { value: SortColumn; label: string }[] = [
   { value: 'provider', label: 'Provider order' }, { value: 'name', label: 'Name' }, { value: 'size', label: 'Size' },
   { value: 'modified', label: 'Modified' }, { value: 'storageClass', label: 'Storage class' },
-]
-const detailColumns: { id: DetailColumn; label: string }[] = [
-  { id: 'contentType', label: 'Content type' }, { id: 'versionId', label: 'Version ID' }, { id: 'etag', label: 'ETag' },
 ]
 
 function resetSearch(): void {
@@ -48,24 +45,13 @@ function resetSearch(): void {
     </div>
     <div class="listing-actions"><button type="submit">Apply to listing</button><button type="button" class="subtle" @click="resetSearch">Reset filters</button></div>
   </form>
-  <details class="listing-columns tool-menu">
-    <summary>Columns</summary>
-    <div class="pop-menu listing-column-menu">
-      <label><input v-model="browser.technical" type="checkbox" /> Storage class</label>
-      <label v-for="column in detailColumns" :key="column.id"><input v-model="browser.detailColumns" type="checkbox" :value="column.id" /> {{ column.label }}</label>
-      <button @click="browser.columnWidths = {}">Reset widths</button>
-    </div>
-  </details>
 </template>
 
 <style scoped>
 .listing-options { display: grid; gap: 12px; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 12px; margin-bottom: 12px; }
-.listing-fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(114px, 1fr)); gap: 10px; }
+.listing-fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 150px), 1fr)); gap: 10px; }
 .listing-fields label { display: block; margin-bottom: 4px; }
 .listing-fields input { width: 100%; }
 .listing-switches, .listing-actions { display: flex; flex-wrap: wrap; gap: 10px 14px; }
-.listing-switches label, .listing-column-menu label { display: flex; align-items: center; gap: 6px; }
-.listing-columns { margin-bottom: 8px; width: max-content; }
-.listing-columns summary { color: var(--accent-deep); cursor: pointer; }
-.listing-column-menu { left: 0; right: auto; padding: 9px; gap: 6px; }
+.listing-switches label { display: flex; align-items: center; gap: 6px; }
 </style>

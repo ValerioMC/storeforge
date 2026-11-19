@@ -19,6 +19,7 @@ export interface EndpointSettings {
   standardTags: string[]
   administrativeTags: string[]
   caCertificate: string
+  proxyUrl: string
   browserEnabled: boolean
   managerEnabled: boolean
   defaultWorkspace: Workspace | null
@@ -128,7 +129,7 @@ export const capabilityNames: Record<CapabilityState, string> = {
 
 export function endpointSettings(): EndpointSettings {
   return {
-    tenant: '', account: '', realm: '', defaultEndpoint: false, standardTags: [], administrativeTags: [], caCertificate: '',
+    tenant: '', account: '', realm: '', defaultEndpoint: false, standardTags: [], administrativeTags: [], caCertificate: '', proxyUrl: '',
     browserEnabled: true, managerEnabled: true, defaultWorkspace: null, coordinates: null,
   }
 }

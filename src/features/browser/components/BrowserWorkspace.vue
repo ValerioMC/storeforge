@@ -29,6 +29,7 @@ import { objectId, parentPrefix, type Location, type ObjectId, type ObjectRow, t
 import { useBrowser, useEmbeddedBrowser } from '../store/browser'
 import BrowserFavorites from './BrowserFavorites.vue'
 import BrowserFolderTree from './BrowserFolderTree.vue'
+import BrowserColumnMenu from './BrowserColumnMenu.vue'
 import BrowserListingOptions from './BrowserListingOptions.vue'
 import FolderDialog from './FolderDialog.vue'
 import ObjectInspector from './ObjectInspector.vue'
@@ -556,7 +557,7 @@ async function copyPath(): Promise<void> {
             <Notice v-if="browser.bucketError" tone="error">{{ browser.bucketError }}</Notice>
 
             <FadeRegion>
-              <div v-if="tab === 'Objects'">
+              <div v-if="tab === 'Objects'" class="objects-pane">
                 <div class="object-tools">
                   <form class="object-search" role="search" @submit.prevent="applyListing">
                     <Search :size="17" /><input ref="filterField" v-model="filter" type="search" placeholder="Search objects…" aria-label="Search objects" />
@@ -599,6 +600,7 @@ async function copyPath(): Promise<void> {
                 <div class="browser-path-tools">
                   <BrowserFolderTree :key="connections.contextKey" :connection="browser.location.connection" :bucket="browser.bucket" :prefix="browser.prefix" @navigate="navigate(browser.bucket, $event)" />
                   <BrowserFavorites v-if="!embedded" :favorites="browser.favorites" @open="openFavorite" @remove="browser.toggleFavorite($event)" />
+                  <BrowserColumnMenu :browser="browser" />
                 </div>
                 <div v-if="pathDetails" class="browser-path-details">
                   <dl>
@@ -632,7 +634,7 @@ async function copyPath(): Promise<void> {
 
                 <BrowserTransferQueue v-if="!demo" :operation-ids="operationIds" />
                 <FadeRegion>
-                  <div :key="listingLocation">
+                  <div :key="listingLocation" class="objects-listing">
                     <Notice v-if="browser.error" tone="error">{{ browser.error }}</Notice>
                     <Notice v-if="browser.deletedError" tone="error">Deleted objects unavailable. {{ browser.deletedError }}</Notice>
                     <p v-if="browser.loading" class="loading-line" role="status">Reading objects…</p>
@@ -728,9 +730,9 @@ async function copyPath(): Promise<void> {
 .browser-host.embedded .browser-layout:has(> .inspector) .listing { display: none; }
 .object-tools, .selection-buttons { flex-wrap: wrap; }
 .rename-key { white-space: pre-wrap; overflow-wrap: anywhere; }
-.object-search { max-width: 380px; }
+.object-search { max-width: clamp(340px, 42%, 680px); }
 .object-search button { min-height: 27px; }
-.browser-path-tools { display: grid; gap: 7px; margin-bottom: 10px; }
+.browser-path-tools { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 7px; margin-bottom: 12px; }
 .browser-path-editor, .browser-path-details { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 9px; margin-bottom: 10px; }
 .path-choices { display: flex; flex-wrap: wrap; gap: 4px; }
 .path-choices code, .browser-path-details code { white-space: pre-wrap; overflow-wrap: anywhere; }

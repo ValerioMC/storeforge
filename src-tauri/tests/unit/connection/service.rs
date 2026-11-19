@@ -292,3 +292,89 @@ fn workspace_dashboards_validates_coordinates_and_retains_zero() {
     });
     assert!(validate_profile(&draft, None, &[]).is_err());
 }
+
+#[test]
+fn connection_proxy_accepts_an_origin_without_exposing_rejected_credentials() {
+    assert_eq!(normalize_proxy_url(" ").unwrap(), "");
+    assert_eq!(
+        normalize_proxy_url(" http://127.0.0.1:33128/ ").unwrap(),
+        "http://127.0.0.1:33128",
+    );
+    for invalid in [
+        "socks5://proxy.example.test:1080",
+        "http://user:fixture-secret@proxy.example.test",
+        "http://proxy.example.test/path",
+        "http://proxy.example.test?token=fixture-secret",
+        "http://proxy.example.test#fragment",
+    ] {
+        let error = normalize_proxy_url(invalid).unwrap_err();
+        assert!(!error.to_string().contains("fixture-secret"));
+    }
+}
+
+#[tokio::test]
+async fn connection_proxy_routes_connection_checks_and_signed_calls_through_https_connect() {
+    use crate::common::signing::{SignedClient, request};
+    use crate::transfer::security::write_client;
+
+    let (proxy, requests) = mock_endpoint(vec![("403 Forbidden", ""), ("403 Forbidden", "")]);
+    let endpoint = "https://storage-proxy.example.invalid";
+    let directory = tempfile::tempdir().unwrap();
+    let service = ConnectionService::with_credentials(
+        ConnectionRepository::open(directory.path().into()).unwrap(),
+        MockKeyring::default(),
+    );
+    let mut draft = draft_for(endpoint, "tenant", "test-access");
+    draft.settings.as_mut().unwrap().proxy_url = proxy.clone();
+    let profile = service.save(draft).await.unwrap();
+    assert_eq!(service.list().unwrap()[0].settings.proxy_url, proxy);
+    let session = service.session(profile.id).unwrap();
+    assert!(
+        write_client(&session.s3)
+            .head_bucket()
+            .bucket("archive")
+            .send()
+            .await
+            .is_err()
+    );
+    let client = SignedClient::for_connection(&session.profile).unwrap();
+    let request = request(
+        reqwest::Method::GET,
+        Url::parse(endpoint).unwrap(),
+        None,
+        Vec::new(),
+    )
+    .unwrap();
+    assert!(client.send(&session, "s3", request).await.is_err());
+    let requests = requests.join().unwrap();
+    assert!(requests.iter().all(|request| {
+        request.starts_with("CONNECT storage-proxy.example.invalid:443 HTTP/1.1")
+            && !request.to_ascii_lowercase().contains("authorization:")
+    }));
+}
+
+#[tokio::test]
+async fn connection_proxy_preserves_a_successful_check_without_affecting_other_profiles() {
+    let (proxy, requests) = mock_endpoint(vec![("200 OK", "")]);
+    let (direct, direct_requests) = mock_endpoint(vec![("200 OK", "")]);
+    let directory = tempfile::tempdir().unwrap();
+    let service = ConnectionService::with_credentials(
+        ConnectionRepository::open(directory.path().into()).unwrap(),
+        MockKeyring::default(),
+    );
+    let mut draft = draft_for(
+        "http://proxy-only.example.invalid",
+        "proxied",
+        "proxy-access",
+    );
+    draft.settings.as_mut().unwrap().proxy_url = proxy;
+    draft.validate_s3 = true;
+    assert_eq!(service.check(draft).await.unwrap().bucket_count, Some(1));
+    let mut separate = draft_for(&direct, "direct", "direct-access");
+    separate.validate_s3 = true;
+    assert_eq!(service.check(separate).await.unwrap().bucket_count, Some(1));
+    assert!(
+        requests.join().unwrap()[0].starts_with("HEAD http://proxy-only.example.invalid/archive")
+    );
+    assert!(direct_requests.join().unwrap()[0].starts_with("HEAD /archive"));
+}

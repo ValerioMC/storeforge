@@ -12,7 +12,7 @@ export function parseProfile(source: string): ProfileFields {
   if (input.settings !== undefined) {
     if (!isRecord(input.settings)) throw new Error('Invalid endpoint settings.')
     const values = input.settings
-    for (const key of ['tenant', 'account', 'realm', 'caCertificate'] as const) {
+    for (const key of ['tenant', 'account', 'realm', 'caCertificate', 'proxyUrl'] as const) {
       const value = values[key]
       if (typeof value === 'string') settings[key] = value
       else if (value !== undefined) throw new Error('Invalid endpoint settings.')

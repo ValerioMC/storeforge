@@ -212,6 +212,8 @@ async function importProfile(event: Event): Promise<void> {
             <label>Connection name<input v-model="name" placeholder="e.g. Production RGW" autofocus /></label>
             <label>Provider<AppSelect v-model="provider" :options="providerOptions" /></label>
             <label class="span-two">Endpoint URL<input v-model="endpoint" :type="stage === 'endpoint' ? 'url' : 'text'" :placeholder="provider === 'aws' ? 'Use the AWS endpoint for this region' : 'https://storage.example.com'" /></label>
+            <label class="span-two">Proxy URL <small>Optional</small><input v-model.trim="settings.proxyUrl" type="url"
+              placeholder="http://proxy.example.com:33128" spellcheck="false" /></label>
             <label>Signing region<input v-model="region" spellcheck="false" /></label>
             <label>Addressing<AppSelect v-model="pathStyle" :options="addressingOptions" /></label>
           </div>
@@ -279,6 +281,7 @@ async function importProfile(event: Event): Promise<void> {
           <dl class="setup-summary">
             <div><dt>Connection</dt><dd>{{ name }}</dd></div>
             <div><dt>Endpoint</dt><dd>{{ endpoint || 'AWS regional endpoint' }}</dd></div>
+            <div v-if="settings.proxyUrl"><dt>Proxy</dt><dd>{{ settings.proxyUrl }}</dd></div>
             <div><dt>Region</dt><dd>{{ region }}</dd></div>
             <div><dt>Workspaces</dt><dd>{{ [settings.browserEnabled && 'Browser', settings.managerEnabled && 'Manager'].filter(Boolean).join(', ') || 'Admin only' }}</dd></div>
           </dl>

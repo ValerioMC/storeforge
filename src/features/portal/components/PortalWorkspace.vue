@@ -125,7 +125,7 @@ function openSpace(spaceId: string): void {
 <style>
 .portal-page { --portal-inset: 16px; }
 .portal-page > .workspace-tabs { flex-wrap: wrap; }
-.portal-content { display: grid; gap: 14px; min-width: 0; }
+.portal-content { gap: 14px; min-width: 0; }
 .portal-context { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 10px var(--portal-inset); }
 .portal-context > .select-field { min-width: 180px; }
 .portal-panel { display: grid; gap: 12px; min-width: 0; padding: var(--portal-inset); border: 1px solid var(--line); border-radius: 10px; background: var(--surface); align-content: start; }

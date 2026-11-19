@@ -8,7 +8,8 @@ use aws_sdk_s3::{
     },
 };
 use aws_smithy_http_client::{
-    Builder,
+    Builder, Connector,
+    proxy::ProxyConfig,
     tls::{Provider as TlsProvider, TlsContext, TrustStore, rustls_provider::CryptoMode},
 };
 use rustls_pki_types::{CertificateDer, pem::PemObject};
@@ -536,6 +537,7 @@ fn validate_profile(
     settings.account = settings.account.trim().into();
     settings.realm = settings.realm.trim().into();
     validate_ca(&settings.ca_certificate)?;
+    settings.proxy_url = normalize_proxy_url(&settings.proxy_url)?;
     if settings.coordinates.is_some_and(|point| {
         !(-90.0..=90.0).contains(&point.latitude) || !(-180.0..=180.0).contains(&point.longitude)
     }) {
@@ -580,6 +582,7 @@ fn validate_profile(
             && settings.account == profile.settings.account
             && settings.realm == profile.settings.realm
             && settings.ca_certificate == profile.settings.ca_certificate
+            && settings.proxy_url == profile.settings.proxy_url
     });
     let mut services = current
         .map(|profile| profile.services.clone())
@@ -729,6 +732,70 @@ fn missing_profile() -> AppError {
     AppError::Missing("The connection was removed. Select another connection.".into())
 }
 
+pub(crate) fn normalize_proxy_url(input: &str) -> Result<String> {
+    let input = input.trim();
+    if input.is_empty() {
+        return Ok(String::new());
+    }
+    let invalid = || {
+        AppError::Invalid("Enter a proxy URL with an HTTP or HTTPS scheme and host only. Leave credentials, paths, and parameters blank.".into())
+    };
+    let url = Url::parse(input).map_err(|_| invalid())?;
+    if !matches!(url.scheme(), "http" | "https")
+        || url.host_str().is_none()
+        || !url.username().is_empty()
+        || url.password().is_some()
+        || url.path() != "/"
+        || url.query().is_some()
+        || url.fragment().is_some()
+    {
+        return Err(invalid());
+    }
+    Ok(url.origin().ascii_serialization())
+}
+
+fn session_tls(profile: &Connection) -> Result<TlsContext> {
+    let ca = &profile.settings.ca_certificate;
+    if ca.trim().is_empty() {
+        return Ok(TlsContext::default());
+    }
+    validate_ca(ca)?;
+    let trust = TrustStore::default().with_pem_certificate(ca.as_bytes());
+    TlsContext::builder()
+        .with_trust_store(trust)
+        .build()
+        .map_err(|error| AppError::Invalid(error.to_string()))
+}
+
+fn s3_http_client(profile: &Connection) -> Result<Option<aws_sdk_s3::config::SharedHttpClient>> {
+    let proxy = normalize_proxy_url(&profile.settings.proxy_url)?;
+    if proxy.is_empty() && profile.settings.ca_certificate.trim().is_empty() {
+        return Ok(None);
+    }
+    let tls = session_tls(profile)?;
+    if proxy.is_empty() {
+        let client = Builder::new()
+            .tls_provider(TlsProvider::Rustls(CryptoMode::AwsLc))
+            .tls_context(tls)
+            .build_https();
+        return Ok(Some(client));
+    }
+    let proxy = ProxyConfig::all(proxy.as_str())
+        .map_err(|_| AppError::Invalid("The connection proxy URL is invalid.".into()))?;
+    let client = Builder::new().build_with_connector_fn(move |settings, components| {
+        let mut connector = Connector::builder()
+            .proxy_config(proxy.clone())
+            .tls_provider(TlsProvider::Rustls(CryptoMode::AwsLc))
+            .tls_context(tls.clone());
+        connector.set_connector_settings(settings.cloned());
+        if let Some(components) = components {
+            connector.set_sleep_impl(components.sleep_impl());
+        }
+        connector.build()
+    });
+    Ok(Some(client))
+}
+
 pub fn open_session(
     profile: Connection,
     context: ExecutionContext,
@@ -784,18 +851,7 @@ fn build_session(
     if !profile.endpoint.is_empty() {
         builder = builder.endpoint_url(&profile.endpoint);
     }
-    if !profile.settings.ca_certificate.trim().is_empty() {
-        validate_ca(&profile.settings.ca_certificate)?;
-        let trust =
-            TrustStore::default().with_pem_certificate(profile.settings.ca_certificate.as_bytes());
-        let tls = TlsContext::builder()
-            .with_trust_store(trust)
-            .build()
-            .map_err(|error| AppError::Invalid(error.to_string()))?;
-        let client = Builder::new()
-            .tls_provider(TlsProvider::Rustls(CryptoMode::AwsLc))
-            .tls_context(tls)
-            .build_https();
+    if let Some(client) = s3_http_client(&profile)? {
         builder = builder.http_client(client);
     }
     Ok(Session {
