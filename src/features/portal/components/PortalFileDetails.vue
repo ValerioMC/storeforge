@@ -11,8 +11,8 @@ import { usePortalTask } from '../composables/usePortalTask'
 import type { FileView } from '../model/navigation'
 import { fileName, type FileDetail, type FileVersion, type FileVersions, type SpaceScope } from '../model/spaces'
 
-const props = defineProps<{ scope: SpaceScope; objectKey: string; view: FileView; write: boolean; trash: boolean }>()
-const emit = defineEmits<{ close: []; view: [view: FileView]; changed: [] }>()
+const props = defineProps<{ scope: SpaceScope; objectKey: string; view: FileView; write: boolean; trash: boolean; sharing: boolean }>()
+const emit = defineEmits<{ close: []; view: [view: FileView]; changed: []; share: [] }>()
 const info = usePortalTask<FileDetail>()
 const history = usePortalTask<FileVersions>()
 const mutation = usePortalTask<boolean>()
@@ -104,6 +104,7 @@ async function apply(): Promise<void> {
           <p v-else-if="detail.preview_unavailable_reason" class="muted portal-note">{{ detail.preview_unavailable_reason }}</p>
           <div v-if="!confirmation" class="portal-inline">
             <button type="button" :disabled="pending" @click="download()"><Download :size="15" /> Download</button>
+            <button v-if="sharing && write" type="button" :disabled="pending" @click="emit('share')">Create public link</button>
             <button v-if="write" type="button" :disabled="pending" @click="confirmation = { kind: 'delete' }">Delete file</button>
           </div>
         </template>

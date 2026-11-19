@@ -1,3 +1,6 @@
+#[path = "sharing.rs"]
+mod sharing;
+
 use std::path::{Path, PathBuf};
 
 use percent_encoding::{NON_ALPHANUMERIC, utf8_percent_encode};
@@ -211,6 +214,7 @@ impl<'a> ProjectSession<'a> {
 
     async fn read(&self, operation: PortalRead) -> Result<Value> {
         match operation {
+            PortalRead::Sharing { view } => self.read_sharing(view).await,
             PortalRead::Projects => Err(AppError::Invalid(
                 "Project catalog requests are unscoped.".into(),
             )),
@@ -315,6 +319,7 @@ impl<'a> ProjectSession<'a> {
 
     async fn change(&self, operation: PortalChange) -> Result<Value> {
         match operation {
+            PortalChange::Sharing { action } => self.change_sharing(action).await,
             PortalChange::Create { draft } => {
                 self.submit(Method::POST, "/api/portal/storage-spaces", &draft)
                     .await
@@ -364,7 +369,12 @@ impl<'a> ProjectSession<'a> {
         }
     }
 
-    async fn submit(&self, method: Method, path: &str, draft: &impl Serialize) -> Result<Value> {
+    async fn submit<T: DeserializeOwned>(
+        &self,
+        method: Method,
+        path: &str,
+        draft: &impl Serialize,
+    ) -> Result<T> {
         let request = self
             .portal
             .remote

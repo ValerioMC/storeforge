@@ -12,6 +12,9 @@ import { portalApi } from '../api/portal'
 import { usePortalTask } from '../composables/usePortalTask'
 import { portalPages, type PortalLocation, type PortalPage } from '../model/navigation'
 import type { PortalProject, PortalScope } from '../model/spaces'
+import PortalCollaborators from './PortalCollaborators.vue'
+import PortalKeys from './PortalKeys.vue'
+import PortalMembershipRequests from './PortalMembershipRequests.vue'
 import PortalDashboard from './PortalDashboard.vue'
 import PortalSpaces from './PortalSpaces.vue'
 
@@ -21,7 +24,7 @@ const services = useSharedProfile(status => !!status.session?.access.portal.avai
 const { serviceId, profile, options, pending, error } = services
 const projects = usePortalTask<PortalProject[]>()
 const revision = ref(0)
-const tabs = [{ value: 'overview', label: 'Overview' }, { value: 'spaces', label: 'Storage spaces' }] as const
+const tabs = (Object.keys(portalPages) as PortalPage[]).map(value => ({ value, label: portalPages[value] }))
 const projectOptions = computed(() => (projects.data.value ?? []).map(project => ({ value: String(project.id), label: project.name })))
 const project = computed(() => projects.data.value?.find(project => project.id === props.location.projectId))
 const eligible = computed(() => !!profile.value?.session?.access.portal.available)
@@ -66,6 +69,10 @@ function selectPage(page: PortalPage): void {
   emit('navigate', { page, serviceId: serviceId.value || undefined, projectId: project.value?.id })
 }
 
+function openPerson(personId?: number): void {
+  if (scope.value) emit('navigate', { page: 'collaborators', serviceId: scope.value.id, projectId: scope.value.project, personId })
+}
+
 function openSpace(spaceId: string): void {
   if (scope.value) emit('navigate', { page: 'spaces', serviceId: scope.value.id, projectId: scope.value.project, spaceId })
 }
@@ -97,6 +104,10 @@ function openSpace(spaceId: string): void {
           description="Authorize a saved shared service to open projects you can access." />
         <Notice v-else-if="!scope">{{ location.projectId ? 'This project is unavailable on the selected service.' : 'No Portal projects are assigned to this account.' }}</Notice>
         <PortalDashboard v-else-if="location.page === 'overview'" :scope="scope" :project="project!" @open="openSpace" @spaces="selectPage('spaces')" />
+        <PortalCollaborators v-else-if="location.page === 'collaborators'" :scope="scope" :person="location.personId"
+          :manager="project?.portal_role === 'portal_manager'" @person="openPerson" @space="openSpace" @requests="selectPage('requests')" />
+        <PortalKeys v-else-if="location.page === 'keys'" :scope="scope" />
+        <PortalMembershipRequests v-else-if="location.page === 'requests'" :scope="scope" />
         <PortalSpaces v-else :scope="scope" :location="location" @navigate="emit('navigate', $event)" @open="openSpace" @spaces="selectPage('spaces')" />
       </div>
     </FadeRegion>

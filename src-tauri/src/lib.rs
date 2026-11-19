@@ -88,6 +88,7 @@ pub fn run() {
             portal::controller::portal_preview,
             portal::controller::portal_download,
             portal::controller::portal_upload,
+            portal::controller::export_portal_client,
             bucket_commands::list_buckets,
             bucket_commands::bucket_workbench_inventory,
             bucket_commands::bucket_workbench_configuration,

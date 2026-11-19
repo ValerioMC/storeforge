@@ -28,6 +28,8 @@ export interface PortalState {
   can_create_team_storage_spaces: boolean
   can_create_external_sharing: boolean
   can_manage_portal_users: boolean
+  portal_collaborator_role_management_delegated: boolean
+  portal_collaborator_addition_delegated: boolean
   allow_named_bucket_create: boolean
   server_access_logging_enabled: boolean
   storage_space_version_cleanup_enabled: boolean
@@ -55,6 +57,8 @@ export interface PortalSpace extends SpaceUsage {
   visibility: 'private' | 'shared'
   share_scope: 'restricted' | 'account'
   account_member_role: GrantRole | null
+  internal_bucket_name?: string | null
+  region?: string | null
   name_editable: boolean
   created_at: string | null
   icon: { source: 'preset' | 'uploaded'; preset: SpaceIcon | null }

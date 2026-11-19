@@ -11,8 +11,8 @@ import type { FileView, PortalLocation } from '../model/navigation'
 import { fileName, parentFolder, spaceAccess, type FileListing, type PortalSpace, type SpaceOperationResult, type SpaceScope, type TrashListing } from '../model/spaces'
 import PortalFileDetails from './PortalFileDetails.vue'
 
-const props = defineProps<{ scope: SpaceScope; space: PortalSpace; location: PortalLocation; cleanup: boolean }>()
-const emit = defineEmits<{ navigate: [location: PortalLocation] }>()
+const props = defineProps<{ scope: SpaceScope; space: PortalSpace; location: PortalLocation; cleanup: boolean; sharing: boolean }>()
+const emit = defineEmits<{ navigate: [location: PortalLocation]; share: [object: string] }>()
 const files = usePortalTask<FileListing>()
 const trash = usePortalTask<TrashListing>()
 const mutation = usePortalTask<boolean>()
@@ -176,8 +176,8 @@ async function submit(): Promise<void> {
   </section>
 
   <PortalFileDetails v-if="location.object && access.browse" :key="location.object"
-    :scope="scope" :object-key="location.object" :view="location.fileView ?? 'details'" :write="access.write" :trash="isTrash"
-    @close="navigate(prefix)" @view="navigate(prefix, location.object, $event)" @changed="refresh" />
+    :scope="scope" :object-key="location.object" :view="location.fileView ?? 'details'" :write="access.write" :trash="isTrash" :sharing="sharing"
+    @close="navigate(prefix)" @view="navigate(prefix, location.object, $event)" @share="emit('share', location.object)" @changed="refresh" />
 
   <Modal v-if="action" :title="action === 'folder' ? 'New folder' : action === 'cleanup' ? 'Clean version history' : action === 'upload' ? 'Upload file' : 'Restore deleted folder'" @close="!writing && (action = undefined)">
     <form class="modal-form" @submit.prevent="submit">

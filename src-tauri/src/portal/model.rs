@@ -4,6 +4,9 @@ use serde::{Deserialize, Serialize};
 #[serde(tag = "kind", rename_all = "camelCase")]
 pub enum PortalRead {
     Projects,
+    Sharing {
+        view: SharingRead,
+    },
     State,
     Usage,
     Trends,
@@ -39,6 +42,7 @@ pub enum PortalRead {
 #[derive(Deserialize)]
 #[serde(tag = "kind", rename_all = "camelCase")]
 pub enum PortalChange {
+    Sharing { action: SharingChange },
     Create { draft: SpaceCreate },
     Import { draft: SpaceImport },
     Edit { draft: SpaceEdit },
@@ -94,13 +98,13 @@ enum Visibility {
 
 #[derive(Deserialize, Serialize)]
 #[serde(rename_all = "lowercase")]
-enum ShareScope {
+pub enum ShareScope {
     Restricted,
     Account,
 }
 
 #[derive(Deserialize, Serialize)]
-enum GrantRole {
+pub enum GrantRole {
     Viewer,
     Editor,
 }
@@ -160,4 +164,127 @@ pub enum SpaceStatus {
     Active,
     Attention,
     Archived,
+}
+
+#[derive(Deserialize, Serialize)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum SharingRead {
+    Collaborators,
+    Requests,
+    Collaborator { user_id: u64 },
+    Access,
+    Links,
+    Keys,
+}
+
+#[derive(Deserialize)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum SharingChange {
+    Audience {
+        share_scope: ShareScope,
+        account_member_role: Option<GrantRole>,
+    },
+    Grant {
+        user_id: u64,
+        role: GrantRole,
+    },
+    ChangeRole {
+        user_id: u64,
+        role: GrantRole,
+    },
+    Revoke {
+        user_id: u64,
+    },
+    CreateLink {
+        object_key: String,
+        label: Option<String>,
+        expires_at: Option<String>,
+    },
+    RevokeLink {
+        link_id: u64,
+    },
+    PersonalKey,
+    ExternalKey {
+        storage_space_id: String,
+        external_email: String,
+        permission: KeyPermission,
+    },
+    KeyStatus {
+        key_id: String,
+        active: bool,
+    },
+    DeleteKey {
+        key_id: String,
+    },
+    AddMember {
+        target_name: String,
+        target_email: String,
+        portal_role: ProjectRole,
+        reason: Option<String>,
+    },
+    RemoveMember {
+        target_email: String,
+        target_name: Option<String>,
+        reason: Option<String>,
+    },
+    MemberRole {
+        target_user_id: u64,
+        portal_role: ProjectRole,
+        reason: Option<String>,
+    },
+}
+
+#[derive(Deserialize, Serialize, Clone, Copy)]
+#[serde(rename_all = "snake_case")]
+pub enum KeyPermission {
+    ReadOnly,
+    ReadWrite,
+}
+
+#[derive(Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ProjectRole {
+    PortalUser,
+    PortalManager,
+}
+
+#[derive(Deserialize, Serialize)]
+pub struct AccessKeys {
+    pub s3_endpoint: Option<String>,
+    pub force_path_style: bool,
+    pub access_keys: Vec<AccessKey>,
+    pub can_manage_access_keys: bool,
+    pub can_create_external_access: bool,
+    pub max_access_keys: u64,
+}
+
+#[derive(Deserialize, Serialize)]
+pub struct AccessKey {
+    pub access_key_id: String,
+    pub target_type: AccessKeyTarget,
+    pub status: Option<String>,
+    pub created_at: Option<String>,
+    pub is_active: bool,
+    pub is_portal: bool,
+    pub deletable: bool,
+    pub expires_at: Option<String>,
+    pub external_email: Option<String>,
+    pub storage_space_name: Option<String>,
+    pub bucket_name: Option<String>,
+    pub permission: Option<KeyPermission>,
+}
+
+#[derive(Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum AccessKeyTarget {
+    #[serde(rename = "self")]
+    Personal,
+    External,
+}
+
+#[derive(Deserialize, Serialize)]
+pub struct KeyReceipt {
+    #[serde(flatten)]
+    pub key: AccessKey,
+    pub secret_access_key: Option<String>,
 }

@@ -13,6 +13,7 @@ import { usePortalTask } from '../composables/usePortalTask'
 import type { PortalLocation, SpaceView } from '../model/navigation'
 import { spaceAccess, type PortalSpace, type PortalState, type SpaceIcon, type SpaceScope, type SpaceStatistics } from '../model/spaces'
 import PortalFiles from './PortalFiles.vue'
+import PortalSpaceSharing from './PortalSpaceSharing.vue'
 import PortalSpaceSettings from './PortalSpaceSettings.vue'
 
 const props = defineProps<{ scope: SpaceScope; location: PortalLocation; state?: PortalState }>()
@@ -27,7 +28,7 @@ const view = computed(() => props.location.view ?? 'files')
 const access = computed(() => space.value ? spaceAccess(space.value) : undefined)
 const tabs = [
   { value: 'files', label: 'Files' }, { value: 'trash', label: 'Deleted files' },
-  { value: 'statistics', label: 'Statistics' }, { value: 'settings', label: 'Settings' },
+  { value: 'sharing', label: 'Sharing' }, { value: 'statistics', label: 'Statistics' }, { value: 'settings', label: 'Settings' },
 ] as const
 const iconOptions: { value: SpaceIcon | 'default'; label: string }[] = [
   { value: 'default', label: 'Default' }, { value: 'bucket', label: 'Bucket' }, { value: 'folder', label: 'Folder' },
@@ -50,10 +51,10 @@ function reload(): Promise<PortalSpace | undefined> {
   return resource.run(() => portalApi.space(props.scope))
 }
 
-function selectView(next: SpaceView): void {
+function selectView(next: SpaceView, object?: string): void {
   emit('navigate', {
     page: 'spaces', serviceId: props.scope.id, projectId: props.scope.project, spaceId: props.scope.space,
-    view: next, folder: props.location.folder,
+    view: next, folder: props.location.folder, object,
   })
 }
 
@@ -125,7 +126,9 @@ async function submit(): Promise<void> {
       <FadeRegion>
         <div :key="`space-view:${view === 'files' || view === 'trash' ? 'browser' : view}`" class="space-detail">
           <PortalFiles v-if="view === 'files' || view === 'trash'" :scope="scope" :space="space" :location="location"
-            :cleanup="Boolean(state?.storage_space_version_cleanup_enabled)" @navigate="emit('navigate', $event)" />
+            :cleanup="Boolean(state?.storage_space_version_cleanup_enabled)" :sharing="Boolean(state?.can_create_external_sharing)"
+            @navigate="emit('navigate', $event)" @share="selectView('sharing', $event)" />
+          <PortalSpaceSharing v-else-if="view === 'sharing'" :scope="scope" :status="space.status" :object-key="location.object" @changed="reload" />
           <PortalSpaceSettings v-else-if="view === 'settings'" :scope="scope" :editable="access.managed && access.write" />
           <section v-else class="portal-panel">
             <h2>Space statistics</h2>

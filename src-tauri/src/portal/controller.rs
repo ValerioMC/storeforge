@@ -78,3 +78,33 @@ pub async fn portal_upload(
 ) -> Result<()> {
     service::upload(&service, id, project, space, key, source).await
 }
+
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ClientExport {
+    Cyberduck,
+    Winscp,
+    Generic,
+}
+
+#[tauri::command]
+pub async fn export_portal_client(
+    window: tauri::WebviewWindow,
+    format: ClientExport,
+    document: String,
+) -> Result<bool> {
+    let (filter, extension) = match format {
+        ClientExport::Cyberduck => ("Cyberduck bookmark", "duck"),
+        ClientExport::Winscp => ("WinSCP session", "ini"),
+        ClientExport::Generic => ("S3 connection settings", "txt"),
+    };
+    crate::common::document::save_text_document(
+        window,
+        &format!("storeforge-space.{extension}"),
+        "Export S3 client setup",
+        filter,
+        extension,
+        document,
+    )
+    .await
+}
