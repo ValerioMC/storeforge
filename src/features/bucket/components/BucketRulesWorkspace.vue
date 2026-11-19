@@ -17,10 +17,10 @@ const browser = useBrowser()
 const search = ref('')
 const feature = ref<RuleFeature>('lifecycle')
 const selected = ref<{ bucket: string; rule: BucketRule }>()
-const state = ref<'all' | 'configured' | 'missing' | 'error' | 'Disabled'>('all')
+const state = ref<'all' | 'configured' | 'missing' | 'unsupported' | 'error' | 'Disabled'>('all')
 const states = computed(() => [
   { value: 'all', label: 'Any state' }, { value: 'configured', label: 'With rules' },
-  { value: 'missing', label: 'Without rules' }, { value: 'error', label: 'Read error' },
+  { value: 'missing', label: 'Without rules' }, { value: 'unsupported', label: 'Unsupported' }, { value: 'error', label: 'Read error' },
   ...(feature.value === 'lifecycle' ? [{ value: 'Disabled', label: 'Disabled rules' } as const] : []),
 ] as const)
 const names = computed(() => browser.location.connection === props.connection ? browser.buckets.map(item => item.name) : [])
@@ -28,7 +28,7 @@ const { rows, pending, refresh } = useConfigurationInventory(computed(() => prop
 const table = computed(() => names.value.flatMap(bucket => {
   const reading = rows.get(bucket)?.[feature.value]
   if (!reading) return []
-  const rules = reading.status === 'error' ? [] : extractRules(feature.value, reading.document)
+  const rules = 'document' in reading ? extractRules(feature.value, reading.document) : []
   const query = search.value.trim().toLowerCase()
   const matched = rules.filter(rule => [bucket, rule.name, rule.detail, rule.status].some(value => value.toLowerCase().includes(query)))
   if (query && !bucket.toLowerCase().includes(query) && !matched.length) return []
@@ -36,7 +36,7 @@ const table = computed(() => names.value.flatMap(bucket => {
     const disabled = matched.filter(rule => rule.status === 'Disabled')
     return disabled.length ? [{ bucket, reading, rules: disabled }] : []
   }
-  const status = reading.status === 'error' ? 'error' : rules.length ? 'configured' : 'missing'
+  const status = 'document' in reading ? (rules.length ? 'configured' : 'missing') : reading.status
   return state.value === 'all' || state.value === status ? [{ bucket, reading, rules: matched }] : []
 }))
 
@@ -68,7 +68,11 @@ async function refreshRules(): Promise<void> {
             <template v-for="{ bucket, reading, rules } in table" :key="bucket">
               <tr v-if="!rules.length">
                 <th scope="row"><button class="subtle bucket-record" @click="emit('inspect', bucket)"><Database :size="15" /> {{ bucket }}</button></th>
-                <td colspan="4"><span v-if="reading.status === 'error'" class="bucket-read-error">{{ reading.message }}</span><span v-else class="muted">No rules</span></td>
+                <td colspan="4">
+                  <span v-if="reading.status === 'error'" class="bucket-read-error">{{ reading.message }}</span>
+                  <span v-else-if="reading.status === 'unsupported'" class="muted">{{ reading.message }}</span>
+                  <span v-else class="muted">No rules</span>
+                </td>
               </tr>
               <tr v-for="(rule, index) in rules" :key="index">
                 <th scope="row"><button class="subtle bucket-record" @click="emit('inspect', bucket)"><Database :size="15" /> {{ bucket }}</button></th>

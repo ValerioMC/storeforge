@@ -1,4 +1,3 @@
-import { errorMessage } from '../../../common/tauri'
 import { executionContext, identityAvailable, type Connection } from '../../connection/model/connection'
 import type { BucketQuota, Configuration } from './bucket'
 import { extractRules, parseConfiguration, readConfiguration, type ConfigurationReading } from './workspace'
@@ -36,16 +35,18 @@ export interface WorkbenchRow extends InventoryBucket {
 }
 
 type Cell = string | number | boolean | null
-type Feature = ConfigurationReading | { status: 'unsupported' }
-export type FeatureReader = (row: WorkbenchRow, section: Configuration) => Feature | undefined
+export type FeatureReader = (row: WorkbenchRow, section: Configuration) => ConfigurationReading | undefined
 export type TagReader = (row: WorkbenchRow) => readonly string[]
+export const unavailableWorkbenchConfiguration = {
+  status: 'unsupported', label: 'Unsupported', message: 'S3 configuration is unavailable in this context.',
+} as const satisfies ConfigurationReading
 
 interface Column {
   id: string
   label: string
   section?: Configuration
   quota?: boolean
-  value: (row: WorkbenchRow, reading: Feature | undefined, tags: readonly string[]) => Cell
+  value: (row: WorkbenchRow, reading: ConfigurationReading | undefined, tags: readonly string[]) => Cell
 }
 
 export const workbenchColumns = [
@@ -146,25 +147,24 @@ function quotaPercent(usage: number | null, maximum: string | undefined, enabled
   return enabled && usage !== null && limit > 0 ? Math.round(1000 * usage / limit) / 10 : null
 }
 
-function featureLabel(reading: Feature | undefined): string | null {
+function featureLabel(reading: ConfigurationReading | undefined): string | null {
   if (!reading) return null
-  if (reading.status === 'unsupported') return 'Unsupported'
   if (reading.status === 'error') return /^AccessDenied\b|\b403\b|\bForbidden\b/i.test(reading.message) ? 'Denied' : 'Read error'
   return reading.label
 }
 
-function lifecycleState(reading: Feature | undefined): string | null {
+function lifecycleState(reading: ConfigurationReading | undefined): string | null {
   if (reading?.status !== 'configured') return featureLabel(reading)
   const statuses = new Set(extractRules('lifecycle', reading.document).map(rule => rule.status).filter(Boolean))
   return [...statuses].sort().join(', ') || 'Configured'
 }
 
-function nativeTags(reading: Feature | undefined): string | null {
+function nativeTags(reading: ConfigurationReading | undefined): string | null {
   if (reading?.status !== 'configured') return featureLabel(reading)
   return extractRules('tagging', reading.document).map(tag => `${tag.name}=${tag.detail}`).join(', ')
 }
 
-function lifecycleActions(reading: Feature | undefined, ...names: string[]): string | null {
+function lifecycleActions(reading: ConfigurationReading | undefined, ...names: string[]): string | null {
   if (reading?.status !== 'configured') return featureLabel(reading)
   const root = parseConfiguration('lifecycle', reading.document).xml!.documentElement
   const actions = xmlChildren(root, 'Rule').filter(rule =>
@@ -172,14 +172,14 @@ function lifecycleActions(reading: Feature | undefined, ...names: string[]): str
   return actions.length ? 'Enabled' : 'Disabled'
 }
 
-function xmlValues(reading: Feature | undefined, section: Configuration, ...names: string[]): string | null {
+function xmlValues(reading: ConfigurationReading | undefined, section: Configuration, ...names: string[]): string | null {
   if (reading?.status !== 'configured') return featureLabel(reading)
   const root = parseConfiguration(section, reading.document).xml!.documentElement
   const values = names.flatMap(name => Array.from(root.getElementsByTagNameNS(root.namespaceURI, name), node => node.textContent ?? ''))
   return [...new Set(values.filter(Boolean))].join(', ') || 'Not configured'
 }
 
-function retention(reading: Feature | undefined): string | null {
+function retention(reading: ConfigurationReading | undefined): string | null {
   const mode = xmlValues(reading, 'objectLock', 'Mode')
   if (reading?.status !== 'configured' || mode === 'Not configured') return mode
   const days = xmlValues(reading, 'objectLock', 'Days')
@@ -193,7 +193,7 @@ function isWildcardPrincipal(principal: unknown): boolean {
   return Object.values(principal).some(value => value === '*' || Array.isArray(value) && value.includes('*'))
 }
 
-function publicPolicy(reading: Feature | undefined): Cell {
+function publicPolicy(reading: ConfigurationReading | undefined): Cell {
   if (reading?.status !== 'configured') return featureLabel(reading)
   const { Statement } = parseConfiguration('policy', reading.document).policy!
   const statements = Array.isArray(Statement) ? Statement : [Statement]
@@ -201,24 +201,15 @@ function publicPolicy(reading: Feature | undefined): Cell {
     statement.Effect === 'Allow' && isWildcardPrincipal(statement.Principal))
 }
 
-function publicAcl(reading: Feature | undefined): Cell {
+function publicAcl(reading: ConfigurationReading | undefined): Cell {
   const groups = xmlValues(reading, 'acl', 'URI')
   return reading?.status === 'configured' ? !!groups?.split(', ').some(group =>
     group === 'http://acs.amazonaws.com/groups/global/AllUsers' || group === 'http://acs.amazonaws.com/groups/global/AuthenticatedUsers') : groups
 }
 
-export async function readWorkbenchFeature(row: WorkbenchRow, section: Configuration, read: () => Promise<string>): Promise<Feature> {
-  if (!row.configurationAvailable) return { status: 'unsupported' }
-  return readConfiguration(async () => {
-    try {
-      return await read()
-    } catch (failure) {
-      if (/^(NotImplemented|NotSupported|XNotImplemented)\b|\b501\b/.test(errorMessage(failure))) {
-        throw new Error('Unsupported provider feature')
-      }
-      throw failure
-    }
-  }, row.name, section).then(value => value.status === 'error' && value.message === 'Unsupported provider feature' ? { status: 'unsupported' } : value)
+export async function readWorkbenchFeature(row: WorkbenchRow, section: Configuration, read: () => Promise<string>): Promise<ConfigurationReading> {
+  if (!row.configurationAvailable) return unavailableWorkbenchConfiguration
+  return readConfiguration(read, row.name, section)
 }
 
 export function matchesCell(value: Cell, operator: FilterOperator, query: string): boolean {

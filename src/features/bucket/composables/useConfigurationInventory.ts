@@ -23,7 +23,7 @@ export function useConfigurationInventory(
     }
     if (id) await scanConfigurations(missing, features, (bucket, feature) => {
       const cached = rows.get(bucket)?.[feature]
-      if (cached && cached.status !== 'error') return Promise.resolve(cached.document)
+      if (cached && 'document' in cached) return Promise.resolve(cached.document)
       return read(bucket, feature)
     }, (bucket, feature, reading) => {
       rows.set(bucket, { ...rows.get(bucket), [feature]: reading })

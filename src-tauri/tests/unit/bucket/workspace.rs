@@ -149,6 +149,37 @@ async fn configuration_read_distinguishes_an_unconfigured_setting_from_a_missing
     requests.join().unwrap();
 }
 
+#[tokio::test]
+async fn configuration_actions_surface_provider_capability_errors() {
+    let (endpoint, requests) = object_drawer_mock(vec![
+        response(
+            "501 Not Implemented",
+            "<Error><Code>NotImplemented</Code></Error>",
+        ),
+        response(
+            "400 Bad Request",
+            "<Error><Code>NotSupported</Code></Error>",
+        ),
+        response("405 Method Not Allowed", ""),
+    ]);
+    let session = fixture_session(&endpoint, IdentityKind::S3);
+    for change in [
+        ConfigurationChange::Read,
+        ConfigurationChange::Write("<Tagging><TagSet/></Tagging>".into()),
+        ConfigurationChange::Remove,
+    ] {
+        assert!(matches!(
+            repository::configure(&session, "bucket", Configuration::Tagging, change).await,
+            Err(crate::common::error::AppError::Unsupported(_))
+        ));
+    }
+
+    let requests = requests.join().unwrap();
+    for (request, method) in requests.iter().zip(["GET", "PUT", "DELETE"]) {
+        assert_bucket_request(request, method, Some("tagging"));
+    }
+}
+
 fn quota_values(max_bytes: &str) -> BucketQuota {
     BucketQuota {
         enabled: true,

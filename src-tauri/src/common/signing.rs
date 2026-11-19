@@ -6,6 +6,7 @@ use aws_sigv4::http_request::{
 };
 use aws_sigv4::sign::v4;
 use reqwest::{Method, StatusCode, header};
+use serde::Deserialize;
 use url::Url;
 
 use crate::connection::{
@@ -13,7 +14,7 @@ use crate::connection::{
     service::{Session, normalize_proxy_url},
 };
 
-use super::error::{AppError, Result};
+use super::error::{AppError, Result, is_unsupported_code};
 
 pub struct SignedClient(reqwest::Client);
 
@@ -50,19 +51,10 @@ impl SignedClient {
         request: http::Request<Vec<u8>>,
     ) -> Result<String> {
         let (status, text) = self.send_document(session, service, request).await?;
-        match status {
-            StatusCode::NOT_FOUND => Err(AppError::Missing(format!(
-                "{} {}",
-                status,
-                truncate_error(&text)
-            ))),
-            status if status.is_success() => Ok(text),
-            _ => Err(AppError::Storage(format!(
-                "{} {}",
-                status,
-                truncate_error(&text)
-            ))),
+        if status.is_success() {
+            return Ok(text);
         }
+        Err(response_error(status, &text))
     }
 
     pub(crate) async fn send_document(
@@ -169,10 +161,98 @@ async fn read_response(mut response: reqwest::Response) -> Result<(StatusCode, S
     Ok((status, String::from_utf8_lossy(&bytes).into_owned()))
 }
 
-fn truncate_error(text: &str) -> String {
-    text.chars().take(1200).collect()
+#[derive(Deserialize)]
+#[serde(rename_all = "PascalCase")]
+struct ProviderErrorCode {
+    #[serde(alias = "code")]
+    code: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "PascalCase")]
+struct ProviderErrorDocument {
+    #[serde(alias = "code")]
+    code: Option<String>,
+    error: Option<ProviderErrorCode>,
+}
+
+fn response_error(status: StatusCode, text: &str) -> AppError {
+    if matches!(
+        status,
+        StatusCode::NOT_IMPLEMENTED | StatusCode::METHOD_NOT_ALLOWED
+    ) || response_error_code(text)
+        .as_deref()
+        .is_some_and(is_unsupported_code)
+    {
+        return AppError::unsupported();
+    }
+    let detail: String = text.chars().take(1200).collect();
+    let message = format!("{status} {detail}");
+    if status == StatusCode::NOT_FOUND {
+        return AppError::Missing(message);
+    }
+    AppError::Storage(message)
+}
+
+fn response_error_code(text: &str) -> Option<String> {
+    let document: ProviderErrorDocument = match text.trim_start().chars().next()? {
+        '<' => quick_xml::de::from_str(text).ok()?,
+        '{' => serde_json::from_str(text).ok()?,
+        _ => return None,
+    };
+    document.code.or_else(|| document.error?.code)
 }
 
 fn transport_error(error: reqwest::Error) -> AppError {
     AppError::Storage(error.without_url().to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn reports_unsupported_actions_without_provider_documents() {
+        for (status, body) in [
+            (StatusCode::NOT_IMPLEMENTED, ""),
+            (
+                StatusCode::METHOD_NOT_ALLOWED,
+                "<html>Method not allowed</html>",
+            ),
+            (
+                StatusCode::BAD_REQUEST,
+                r#"<?xml version="1.0"?><s3:Error xmlns:s3="urn:s3"><s3:Code>NotSupported</s3:Code><s3:RequestId>private</s3:RequestId></s3:Error>"#,
+            ),
+            (
+                StatusCode::BAD_REQUEST,
+                "<ErrorResponse><Error><Code>UnsupportedOperation</Code></Error></ErrorResponse>",
+            ),
+            (
+                StatusCode::NOT_FOUND,
+                r#"{"Code":"XNotImplemented","RequestId":"private"}"#,
+            ),
+        ] {
+            assert_eq!(
+                serde_json::to_value(response_error(status, body)).unwrap(),
+                serde_json::json!({
+                    "kind": "unsupported",
+                    "message": "This endpoint does not support this action.",
+                })
+            );
+        }
+    }
+
+    #[test]
+    fn preserves_missing_configurations_and_access_failures() {
+        let missing = "<Error><Code>NoSuchTagSet</Code></Error>";
+        let denied = "<Error><Code>AccessDenied</Code><Message>Unable to check NotSupported.</Message></Error>";
+        assert!(matches!(
+            response_error(StatusCode::NOT_FOUND, missing),
+            AppError::Missing(message) if message.contains(missing)
+        ));
+        assert!(matches!(
+            response_error(StatusCode::FORBIDDEN, denied),
+            AppError::Storage(message) if message.contains(denied)
+        ));
+    }
 }

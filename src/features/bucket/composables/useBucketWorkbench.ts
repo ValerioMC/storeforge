@@ -7,7 +7,7 @@ import { campaignGateway } from '../api/campaigns'
 import { scopedBucketConfiguration, streamBucketInventory } from '../api/workbench'
 import type { BucketQuota, Configuration } from '../model/bucket'
 import type { CampaignItem } from '../model/campaign'
-import { makeWorkbenchRow, readWorkbenchFeature, type FeatureReader, type InventorySource, type WorkbenchRow } from '../model/workbench'
+import { makeWorkbenchRow, readWorkbenchFeature, unavailableWorkbenchConfiguration, type FeatureReader, type InventorySource, type WorkbenchRow } from '../model/workbench'
 
 interface Snapshot {
   revision: string | null
@@ -129,7 +129,7 @@ export function useBucketWorkbench(profiles: Readonly<Ref<readonly Connection[]>
   }
 
   function reading(row: WorkbenchRow, section: Configuration): Feature | undefined {
-    return row.configurationAvailable ? readings.get(readingKey(row, section)) : { status: 'unsupported' }
+    return row.configurationAvailable ? readings.get(readingKey(row, section)) : unavailableWorkbenchConfiguration
   }
 
   async function readNext(): Promise<void> {

@@ -16,6 +16,7 @@ import type { Connection } from '../src/features/connection/model/connection'
 const tagging = '<Tagging xmlns:e="urn:extension"><TagSet><Tag><Key>  literal key </Key><Value> value  </Value><e:Detail code="retain"> Unknown </e:Detail></Tag></TagSet></Tagging>'
 const lifecycle = '<LifecycleConfiguration xmlns:e="urn:extension"><Rule><ID>Retire reports</ID><Filter><Prefix> reports/</Prefix></Filter><Status>Disabled</Status><Expiration><Days>42</Days></Expiration><e:Extra>keep</e:Extra></Rule></LifecycleConfiguration>'
 const versioning = '<VersioningConfiguration><Status>Enabled</Status></VersioningConfiguration>'
+const unsupported = { kind: 'unsupported', message: 'This endpoint does not support this action.' }
 const profile: Connection = {
   id: 'fixture', name: 'Fixture', provider: 'ceph', endpoint: 'https://fixture.invalid',
   region: 'zone-a', pathStyle: true, knownBuckets: [],
@@ -52,6 +53,38 @@ function button(root: ParentNode, label: string): HTMLButtonElement {
 }
 
 describe('bucket configuration workspace', () => {
+  it('shows an unsupported setting as unavailable and restores the editor after a successful reload', async () => {
+    const request = vi.fn<(_section: Configuration, _change: ConfigurationChange) => Promise<string>>()
+      .mockRejectedValueOnce(unsupported).mockResolvedValue(versioning)
+    const root = mount(BucketSettings, { connection: 'fixture', bucket: 'archive', demo: false, scopedRequest: request })
+    await vi.waitFor(() => expect(root.querySelector('.notice[role="status"]')?.textContent).toContain('This endpoint does not support reading this setting.'))
+    expect(root.querySelector('nav button[aria-pressed="true"]')?.textContent).toContain('Unsupported')
+    expect(root.querySelector('.configuration-editor form')).toBeNull()
+    expect(button(root, 'Import XML').disabled).toBe(true)
+    expect(root.querySelector('.notice[role="alert"]')).toBeNull()
+
+    root.querySelector<HTMLButtonElement>('button[aria-label="Reload configuration"]')!.click()
+    await vi.waitFor(() => expect(root.querySelector('.configuration-editor form')).not.toBeNull())
+    expect(root.querySelector('nav button[aria-pressed="true"]')?.textContent).toContain('Enabled')
+  })
+
+  it.each(['write', 'remove'] as const)('keeps the configuration and identifies an unsupported %s', async action => {
+    const request = vi.fn(async (_section: Configuration, change: ConfigurationChange) => {
+      if (change.action !== 'read') throw unsupported
+      return tagging
+    })
+    const editor = useBucketConfiguration(request)
+    await editor.refresh('tagging')
+    const draft = tagging.replace(' value  ', ' edited  ')
+    editor.edit('tagging', draft)
+    const change = action === 'write' ? { action, document: draft } : { action }
+    expect(await editor.write('tagging', change)).toBe(false)
+    expect(editor.state('tagging')).toMatchObject({
+      reading: { status: 'configured' }, original: tagging, draft, error: '',
+      unsupportedAction: action,
+    })
+  })
+
   it('round-trips provider-specific fields and literal tag spaces through a backup and form edit', () => {
     const backup = readBackup(JSON.stringify({
       format: 'storeforge-bucket-config', version: 1, bucket: 'original', documents: { tagging },
@@ -97,15 +130,17 @@ describe('bucket configuration workspace', () => {
     const read = vi.fn(async (bucket: string) => {
       if (bucket === 'denied') throw new Error('Access denied')
       if (bucket === 'empty') throw { kind: 'missing' }
+      if (bucket === 'unsupported') throw unsupported
       return bucket === 'archive' ? lifecycle : setLifecycleRuleStatus(lifecycle, 0, 'Enabled')
     })
-    await scanConfigurations(['regular', 'archive', 'denied', 'empty'], ['lifecycle'], read, (bucket, _, result) => results.set(bucket, result), () => true)
+    await scanConfigurations(['regular', 'archive', 'denied', 'empty', 'unsupported'], ['lifecycle'], read, (bucket, _, result) => results.set(bucket, result), () => true)
     const found = Array.from(results).flatMap(([bucket, result]) => result.status === 'configured'
       ? extractRules('lifecycle', result.document).filter(rule => rule.status === 'Disabled').map(rule => ({ bucket, ...rule }))
       : [])
     expect(found).toMatchObject([{ bucket: 'archive', name: 'Retire reports', detail: ' reports/', raw: expect.stringContaining('<e:Extra') }])
     expect(results.get('denied')).toMatchObject({ status: 'error', message: 'Access denied' })
     expect(results.get('empty')).toMatchObject({ status: 'missing' })
+    expect(results.get('unsupported')).toMatchObject({ status: 'unsupported', label: 'Unsupported' })
   })
 
   it('keeps review scoped to selected backup sections and leaves an unrelated draft intact', async () => {

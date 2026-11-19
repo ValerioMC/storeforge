@@ -13,6 +13,8 @@ pub enum AppError {
     #[error("{0}")]
     Storage(String),
     #[error("{0}")]
+    Unsupported(String),
+    #[error("{0}")]
     AmbiguousWrite(String),
     #[error("{0}")]
     Reauthenticate(String),
@@ -22,6 +24,23 @@ pub enum AppError {
     File(String),
     #[error("Credential store: {0}")]
     Credential(String),
+}
+
+impl AppError {
+    pub(crate) fn unsupported() -> Self {
+        Self::Unsupported("This endpoint does not support this action.".into())
+    }
+}
+
+pub(crate) fn is_unsupported_code(code: &str) -> bool {
+    matches!(
+        code,
+        "NotImplemented"
+            | "XNotImplemented"
+            | "NotSupported"
+            | "UnsupportedOperation"
+            | "OperationNotSupported"
+    )
 }
 
 impl From<std::io::Error> for AppError {
@@ -54,10 +73,30 @@ pub fn storage_error<E: ProvideErrorMetadata, R: std::fmt::Debug>(
                 .unwrap_or("The selected resource no longer exists.")
                 .into(),
         ),
+        Some(code) if is_unsupported_code(code) => AppError::unsupported(),
         Some(code) => AppError::Storage(format!(
             "{code}: {}",
             message.unwrap_or("Request declined.")
         )),
         None => AppError::Storage(error.to_string()),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use aws_sdk_s3::error::ErrorMetadata;
+
+    #[test]
+    fn sdk_reports_unsupported_actions_without_the_provider_message() {
+        let metadata = ErrorMetadata::builder()
+            .code("NotImplemented")
+            .message("Provider-specific diagnostic")
+            .build();
+        let error = storage_error(SdkError::service_error(metadata, ()));
+        assert!(matches!(
+            error,
+            AppError::Unsupported(message) if message == "This endpoint does not support this action."
+        ));
     }
 }

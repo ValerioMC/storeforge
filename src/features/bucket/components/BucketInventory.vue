@@ -20,10 +20,10 @@ const search = ref('')
 const columns = ref<Configuration[]>([])
 const columnsOpen = ref(false)
 const feature = ref<Configuration | ''>('')
-const status = ref<'all' | 'configured' | 'missing' | 'error'>('all')
+const status = ref<'all' | 'configured' | 'missing' | 'unsupported' | 'error'>('all')
 const statusOptions = [
   { value: 'all', label: 'Any state' }, { value: 'configured', label: 'Configured' },
-  { value: 'missing', label: 'Not configured' }, { value: 'error', label: 'Read error' },
+  { value: 'missing', label: 'Not configured' }, { value: 'unsupported', label: 'Unsupported' }, { value: 'error', label: 'Read error' },
 ] as const
 const featureOptions = [{ value: '', label: 'All features' }, ...configurations.map(({ id, label }) => ({ value: id, label }))]
 const shownColumns = computed(() => configurations.filter(({ id }) => columns.value.includes(id) || id === feature.value))
@@ -80,7 +80,7 @@ defineExpose({ refresh, invalidate })
             <td v-for="{ id } in shownColumns" :key="id">
               <template v-for="reading in [rows.get(item.name)?.[id]]" :key="id">
                 <span v-if="reading?.status === 'error'" :title="reading.message">Read error</span>
-                <span v-else-if="reading">{{ reading.label }}</span>
+                <span v-else-if="reading" :title="reading.status === 'unsupported' ? reading.message : undefined">{{ reading.label }}</span>
                 <span v-else class="muted">—</span>
               </template>
             </td>

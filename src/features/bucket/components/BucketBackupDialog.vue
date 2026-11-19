@@ -7,14 +7,14 @@ import { bucketsApi } from '../api/buckets'
 import type { useBucketConfiguration } from '../composables/useBucketConfiguration'
 import type { Configuration, ConfigurationChange } from '../model/bucket'
 import { configurations } from '../model/configuration'
-import { readBackup, readConfiguration, scanConfigurations, type BucketBackup, type ConfigurationReading } from '../model/workspace'
+import { readBackup, readConfiguration, scanConfigurations, unsupportedConfigurationMessages, type BucketBackup, type ConfigurationReading } from '../model/workspace'
 
 const props = defineProps<{ connection: string; bucket: string; mode: 'export' | 'restore'; editors: ReturnType<typeof useBucketConfiguration>; scopedRequest?: (section: Configuration, change: ConfigurationChange) => Promise<string> }>()
 const emit = defineEmits<{ close: []; changed: [] }>()
 const backup = shallowRef<BucketBackup>()
 const selection = ref<Configuration[]>([])
 const readings = ref<Partial<Record<Configuration, ConfigurationReading>>>({})
-const errors = ref<Partial<Record<Configuration, string>>>({})
+const failures = ref<Partial<Record<Configuration, { tone: 'info' | 'error'; message: string }>>>({})
 const written = ref<Configuration[]>([])
 const busy = ref(true)
 const error = ref('')
@@ -53,12 +53,12 @@ function requestConfiguration(bucket: string, section: Configuration): Promise<s
 
 function currentDocument(section: Configuration): string {
   const reading = readings.value[section]
-  return reading && reading.status !== 'error' ? reading.document : ''
+  return reading && 'document' in reading ? reading.document : ''
 }
 
 function reason(section: Configuration): string {
   const reading = readings.value[section]
-  if (reading?.status === 'error') return reading.message
+  if (reading?.status === 'error' || reading?.status === 'unsupported') return reading.message
   if (written.value.includes(section)) return 'Restored'
   if (exporting.value) return currentDocument(section) ? '' : 'No provider document'
   const local = props.editors.state(section)
@@ -97,8 +97,10 @@ async function restore(selected: Configuration[]): Promise<void> {
     const document = backup.value?.documents[section]
     if (!document) continue
     const latest = await readCurrent(section)
-    if (latest.status === 'error' || latest.document !== currentDocument(section)) {
-      errors.value[section] = latest.status === 'error' ? latest.message : 'The provider configuration changed. Review the current document before retrying.'
+    if (!('document' in latest) || latest.document !== currentDocument(section)) {
+      failures.value[section] = 'document' in latest
+        ? { tone: 'error', message: 'The provider configuration changed. Review the current document before retrying.' }
+        : undefined
       readings.value[section] = latest
       selection.value = selection.value.filter(item => item !== section)
       continue
@@ -109,7 +111,10 @@ async function restore(selected: Configuration[]): Promise<void> {
       written.value.push(section)
       emit('changed')
     } else {
-      errors.value[section] = props.editors.state(section).error
+      const result = props.editors.state(section)
+      failures.value[section] = result.unsupportedAction
+        ? { tone: 'info', message: unsupportedConfigurationMessages[result.unsupportedAction] }
+        : { tone: 'error', message: result.error }
     }
   }
 }
@@ -130,7 +135,7 @@ async function readCurrent(section: Configuration): Promise<ConfigurationReading
         <div v-for="{ id, label } in sections" :key="id">
           <label class="check-label"><input v-model="selection" type="checkbox" :value="id" :disabled="busy || !eligible(id)" /> {{ label }}</label>
           <p v-if="reason(id)" class="muted">{{ reason(id) }}</p>
-          <Notice v-if="errors[id]" tone="error">{{ errors[id] }}</Notice>
+          <Notice v-if="failures[id]?.message" :tone="failures[id]?.tone">{{ failures[id]?.message }}</Notice>
           <details v-if="!exporting">
             <summary>Inspect documents</summary>
             <h3>Current</h3><pre>{{ currentDocument(id) || 'No provider document' }}</pre>

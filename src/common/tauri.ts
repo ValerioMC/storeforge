@@ -19,3 +19,7 @@ export function errorMessage(error: unknown): string {
 export function isMissing(error: unknown): boolean {
   return typeof error === 'object' && error !== null && 'kind' in error && error.kind === 'missing'
 }
+
+export function isUnsupported(error: unknown): boolean {
+  return typeof error === 'object' && error !== null && 'kind' in error && error.kind === 'unsupported'
+}

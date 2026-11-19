@@ -1,4 +1,4 @@
-import { errorMessage } from '../../../common/tauri'
+import { errorMessage, isUnsupported } from '../../../common/tauri'
 import type { BucketUsage, Reading } from '../../monitoring/model/monitoring'
 import type { BucketQuota, Configuration } from './bucket'
 import { configurations } from './configuration'
@@ -167,10 +167,10 @@ export async function captureCampaign(
 }
 
 function unavailableConfiguration(
-  section: CampaignConfiguration, reading: { status: 'unsupported' } | { status: 'error'; message: string },
+  section: CampaignConfiguration, reading: { status: 'unsupported' | 'error'; message: string },
 ): CampaignItem {
   return reading.status === 'unsupported'
-    ? { section, status: 'unsupported', summary: 'S3 configuration is unavailable in this context.' }
+    ? { section, status: 'unsupported', summary: reading.message }
     : { section, status: failureStatus(reading.message), summary: reading.message }
 }
 
@@ -232,14 +232,13 @@ function quotaText(quota: BucketQuota): string {
   return `${quota.enabled ? 'Enabled' : 'Disabled'} · ${quota.maxBytes || 'Unlimited'} bytes · ${quota.maxObjects || 'Unlimited'} objects`
 }
 
-function failureStatus(message: string): 'denied' | 'unsupported' | 'error' {
-  if (/\b(403|AccessDenied|Forbidden)\b|was denied/i.test(message)) return 'denied'
-  return /\b(501|NotImplemented|NotSupported|XNotImplemented)\b/i.test(message) ? 'unsupported' : 'error'
+function failureStatus(message: string): 'denied' | 'error' {
+  return /\b(403|AccessDenied|Forbidden)\b|was denied/i.test(message) ? 'denied' : 'error'
 }
 
 function failedItem(section: CampaignItem['section'], failure: unknown): CampaignItem {
   const summary = errorMessage(failure)
-  return { section, status: failureStatus(summary), summary }
+  return { section, status: isUnsupported(failure) ? 'unsupported' : failureStatus(summary), summary }
 }
 
 export async function previewCampaignTarget(row: WorkbenchRow, patch: CampaignPatch, gateway: CampaignGateway): Promise<CampaignTarget> {

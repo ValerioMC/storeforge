@@ -10,7 +10,7 @@ import { useBucketConfiguration } from '../composables/useBucketConfiguration'
 import type { Configuration, ConfigurationChange } from '../model/bucket'
 import { configurations } from '../model/configuration'
 import type { JsonValue } from '../model/policy-document'
-import { configurationGroups, configurationLabel, extractRules, parseConfiguration, setLifecycleRuleStatus } from '../model/workspace'
+import { configurationGroups, configurationLabel, extractRules, parseConfiguration, setLifecycleRuleStatus, unsupportedConfigurationMessages } from '../model/workspace'
 import { addXmlField, setXmlValue, writeXml, xmlChildren } from '../model/xml-document'
 import { xmlSettings } from '../model/xml-settings'
 import BucketBackupDialog from './BucketBackupDialog.vue'
@@ -24,6 +24,7 @@ const current = computed(() => configurations.find(item => item.id === configura
 const schema = computed(() => configuration.value === 'policy' ? undefined : xmlSettings[configuration.value])
 const editors = shallowRef(newEditors())
 const state = computed(() => editors.value.state(configuration.value))
+const readUnsupported = computed(() => state.value.reading?.status === 'unsupported')
 const xml = shallowRef<XMLDocument>()
 const policy = shallowRef<JsonValue>()
 const revision = ref(0)
@@ -209,16 +210,21 @@ defineExpose({
             <h3>{{ current.label }}</h3>
             <div class="panel-actions">
               <input ref="fileInput" type="file" hidden :accept="`.${current.format.toLowerCase()}`" @change="importFile" />
-              <button type="button" :disabled="state.busy || importing || demo" @click="fileInput?.click()"><Upload :size="15" /> Import {{ current.format }}</button>
+              <button type="button" :disabled="state.busy || importing || demo || readUnsupported" @click="fileInput?.click()"><Upload :size="15" /> Import {{ current.format }}</button>
               <button type="button" :disabled="state.busy || exporting || !state.draft" @click="exportFile"><Download :size="15" /> Export {{ current.format }}</button>
               <button class="icon-button" type="button" aria-label="Reload configuration" :disabled="state.busy" @click="editors.refresh(configuration, true)"><RefreshCw :size="17" /></button>
             </div>
           </div>
           <Notice v-if="state.reading?.status === 'error'" tone="error">Read failed. {{ state.reading.message }}</Notice>
+          <Notice v-else-if="state.reading?.status === 'unsupported'">{{ state.reading.message }}</Notice>
           <Notice v-if="state.error || operationError" tone="error">{{ state.error || operationError }}</Notice>
+          <Notice v-if="state.unsupportedAction">{{ unsupportedConfigurationMessages[state.unsupportedAction] }}</Notice>
           <Notice v-if="state.notice || operationNotice" tone="info">{{ state.notice || operationNotice }}</Notice>
           <p v-if="!state.reading && state.busy" class="muted" role="status">Reading endpoint configuration…</p>
-          <form v-else class="panel-form" :aria-busy="state.busy" @submit.prevent="confirm = 'write'">
+          <div v-else-if="readUnsupported && state.draft !== state.original" class="panel-actions configuration-actions">
+            <button type="button" :disabled="state.busy" @click="edit(state.original)">Discard draft</button>
+          </div>
+          <form v-else-if="!readUnsupported" class="panel-form" :aria-busy="state.busy" @submit.prevent="confirm = 'write'">
             <div v-if="managed && lifecycleRules.length" class="lifecycle-quick-actions">
               <div v-for="(rule, index) in lifecycleRules" :key="index">
                 <span>{{ rule.name }} <small class="muted">{{ rule.status }}</small></span>

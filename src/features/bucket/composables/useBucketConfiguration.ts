@@ -1,5 +1,5 @@
 import { computed, shallowReactive } from 'vue'
-import { errorMessage } from '../../../common/tauri'
+import { errorMessage, isUnsupported } from '../../../common/tauri'
 import type { Configuration, ConfigurationChange } from '../model/bucket'
 import { parseConfiguration, readConfiguration, type ConfigurationReading } from '../model/workspace'
 
@@ -11,6 +11,7 @@ interface Section {
   writing: boolean
   error: string
   notice: string
+  unsupportedAction?: 'write' | 'remove'
 }
 
 export function useBucketConfiguration(request: (section: Configuration, change: ConfigurationChange) => Promise<string>) {
@@ -27,20 +28,20 @@ export function useBucketConfiguration(request: (section: Configuration, change:
   }
 
   function edit(section: Configuration, draft: string): void {
-    update(section, { draft, error: '', notice: '' })
+    update(section, { draft, error: '', notice: '', unsupportedAction: undefined })
   }
 
   async function refresh(section: Configuration, force = false): Promise<void> {
     const prior = state(section)
     if (prior.busy || (!force && prior.reading)) return
-    update(section, { busy: true, error: '', notice: '' })
+    update(section, { busy: true, error: '', notice: '', unsupportedAction: undefined })
     await reload(section)
   }
 
   async function reload(section: Configuration, saved?: string): Promise<void> {
     const reading = await readConfiguration(() => request(section, { action: 'read' }), '', section)
     const prior = state(section)
-    if (reading.status === 'error') {
+    if (!('document' in reading)) {
       update(section, { reading, busy: false, notice: saved === undefined ? '' : 'Saved. The provider could not be read back.' })
       return
     }
@@ -57,7 +58,7 @@ export function useBucketConfiguration(request: (section: Configuration, change:
 
   async function write(section: Configuration, change: Extract<ConfigurationChange, { action: 'write' }> | { action: 'remove' }): Promise<boolean> {
     if (state(section).busy) return false
-    update(section, { busy: true, writing: true, error: '', notice: '' })
+    update(section, { busy: true, writing: true, error: '', notice: '', unsupportedAction: undefined })
     try {
       if (change.action === 'write') parseConfiguration(section, change.document)
       await request(section, change)
@@ -66,9 +67,9 @@ export function useBucketConfiguration(request: (section: Configuration, change:
       await reload(section, saved)
       return true
     } catch (failure) {
-      const error = errorMessage(failure)
       await reload(section)
-      update(section, { error })
+      if (isUnsupported(failure)) update(section, { unsupportedAction: change.action })
+      else update(section, { error: errorMessage(failure) })
       return false
     } finally {
       update(section, { writing: false })

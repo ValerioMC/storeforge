@@ -56,6 +56,9 @@ async fn check_admin(session: &Session, identity: IdentityKind) -> Result<()> {
 }
 
 fn classify(error: &AppError) -> CapabilityState {
+    if matches!(error, AppError::Unsupported(_)) {
+        return CapabilityState::Unavailable;
+    }
     let message = error.to_string();
     let code = message.split([' ', ':']).next().unwrap_or_default();
     match code {

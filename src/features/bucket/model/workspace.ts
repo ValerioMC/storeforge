@@ -1,5 +1,5 @@
-import { errorMessage, isMissing } from '../../../common/tauri'
-import type { Configuration } from './bucket'
+import { errorMessage, isMissing, isUnsupported } from '../../../common/tauri'
+import type { Configuration, ConfigurationChange } from './bucket'
 import { configurations } from './configuration'
 import { readPolicy } from './policy-document'
 import { readXml, writeXml, xmlChildren, setXmlValue } from './xml-document'
@@ -22,8 +22,15 @@ export const ruleFeatures = [
 export type RuleFeature = typeof ruleFeatures[number]['value']
 export type ConfigurationReading =
   | { status: 'configured' | 'missing'; document: string; label: string }
+  | { status: 'unsupported'; label: 'Unsupported'; message: string }
   | { status: 'error'; message: string }
 export type ConfigurationReader = (bucket: string, configuration: Configuration) => Promise<string>
+
+export const unsupportedConfigurationMessages = {
+  read: 'This endpoint does not support reading this setting.',
+  write: 'This endpoint does not support updating this setting.',
+  remove: 'This endpoint does not support removing this setting.',
+} satisfies Record<ConfigurationChange['action'], string>
 
 export interface BucketRule {
   name: string
@@ -68,7 +75,9 @@ export async function readConfiguration(read: ConfigurationReader, bucket: strin
     const label = sectionStatus(configuration, document)
     return { status: label === 'Not configured' ? 'missing' : 'configured', document, label }
   } catch (failure) {
-    return isMissing(failure) ? { status: 'missing', document: '', label: 'Not configured' } : { status: 'error', message: errorMessage(failure) }
+    if (isMissing(failure)) return { status: 'missing', document: '', label: 'Not configured' }
+    if (isUnsupported(failure)) return { status: 'unsupported', label: 'Unsupported', message: unsupportedConfigurationMessages.read }
+    return { status: 'error', message: errorMessage(failure) }
   }
 }
 
