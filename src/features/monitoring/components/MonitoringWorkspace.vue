@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onActivated, ref, watch } from 'vue'
-import { Activity, ArrowUpRight, Database, FolderCog, RefreshCw, Users, Wallet } from 'lucide-vue-next'
+import { Activity, ArrowUpRight, Database, FolderCog, Network, RefreshCw, Users, Wallet } from 'lucide-vue-next'
 import { formatDate } from '../../../common/format'
 import WorkspaceHeader from '../../../components/shell/WorkspaceHeader.vue'
 import AppSelect from '../../../components/ui/AppSelect.vue'
@@ -161,6 +161,9 @@ function refresh(): void {
       <div class="monitoring-grid monitoring-admin-health"><HealthPanel :endpoints="endpointRows" @open="openHealth" /></div>
       <nav class="monitoring-shortcuts" aria-label="Ceph resources">
         <button @click="openMetric('usage')"><Activity :size="17" /> Usage & metrics <ArrowUpRight :size="14" /></button>
+        <button v-if="!demo && identityAvailable(target, 'cephAdmin')" type="button" @click="open({ workspace: 'cephAdmin', page: 'multisite' })">
+          <Network :size="17" /> Multisite <ArrowUpRight :size="14" />
+        </button>
         <button v-for="item in shortcuts" :key="item.group" @click="open(item.group === 'Ceph buckets' ? { workspace: 'cephAdmin', page: 'buckets' } : { workspace: 'cephAdmin', page: 'resources', group: item.group })">
           <component :is="item.icon" :size="17" /> {{ item.label }} <ArrowUpRight :size="14" />
         </button>

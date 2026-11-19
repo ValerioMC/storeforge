@@ -10,6 +10,7 @@ import ConfirmDialog from './components/ui/ConfirmDialog.vue'
 import FadeRegion from './components/ui/FadeRegion.vue'
 import Notice from './components/ui/Notice.vue'
 import AdminWorkspace from './features/administration/components/AdminWorkspace.vue'
+import CephMultisite from './features/administration/components/CephMultisite.vue'
 import BrowserWorkspace from './features/browser/components/BrowserWorkspace.vue'
 import type { Location } from './features/browser/model/objects'
 import { demoConnection } from './features/browser/model/demo'
@@ -68,7 +69,9 @@ const managerRoute = computed(() => route.value.workspace === 'manager' ? route.
 const monitoringRoute = computed(() => {
   const current = route.value
   if (current.workspace === 'manager' && (current.page === 'overview' || current.page === 'metrics')) return { workspace: current.workspace, pane: current.page, metric: current.metric }
-  if (current.workspace === 'cephAdmin' && current.page !== 'resources' && current.page !== 'buckets') return { workspace: current.workspace, pane: current.page ?? 'overview', metric: current.metric }
+  if (current.workspace === 'cephAdmin' && (!current.page || current.page === 'overview' || current.page === 'metrics' || current.page === 'health')) {
+    return { workspace: current.workspace, pane: current.page ?? 'overview', metric: current.metric }
+  }
   if (current.workspace === 'admin' && (current.page === 'overview' || current.page === 'metrics' || current.page === 'health')) return { workspace: current.workspace, pane: current.page, metric: current.metric }
   return undefined
 })
@@ -435,6 +438,8 @@ function showJob(id: string): void {
             <BucketRulesWorkspace v-else-if="managerRoute?.page === 'featureRules' && connections.active"
               :key="`rules:${connections.contextKey}`" :connection="connections.active.id"
               @inspect="go({ workspace: 'manager', page: 'buckets', bucket: $event })" />
+            <CephMultisite v-else-if="route.workspace === 'cephAdmin' && route.page === 'multisite' && connections.active"
+              :key="`multisite:${connections.contextKey}`" :profile="connections.active" />
             <AdminWorkspace v-else-if="route.workspace === 'cephAdmin' || managerRoute?.page === 'access' || (route.workspace === 'admin' && route.page === 'rgwIdentities')"
               :key="`access:${route.workspace}:${connections.contextKey}:${route.workspace === 'cephAdmin' ? route.group ?? '' : ''}:${route.workspace === 'cephAdmin' ? route.bucket ?? '' : ''}`"
               :scope="route.workspace === 'cephAdmin' ? 'ceph' : route.workspace === 'admin' ? 'managedRgw' : 's3'"

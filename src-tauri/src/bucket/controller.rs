@@ -8,7 +8,7 @@ use uuid::Uuid;
 use crate::{
     audit::service::AuditService,
     common::{
-        document::write_text,
+        document::save_text_document,
         error::{AppError, Result},
     },
     connection::{
@@ -248,7 +248,7 @@ pub async fn export_bucket_configuration(
         None | Some(Configuration::Policy) => ("JSON document", "json"),
         Some(_) => ("XML document", "xml"),
     };
-    save_bucket_text(
+    save_text_document(
         window,
         &name,
         "Export bucket configuration",
@@ -279,7 +279,7 @@ pub async fn export_bucket_inventory(
         InventoryExport::Json => ("JSON document", "json"),
     };
     let name = format!("bucket-selection.{extension}");
-    save_bucket_text(
+    save_text_document(
         window,
         &name,
         "Export bucket selection",
@@ -288,42 +288,6 @@ pub async fn export_bucket_inventory(
         document,
     )
     .await
-}
-
-async fn save_bucket_text(
-    window: WebviewWindow,
-    name: &str,
-    title: &str,
-    filter: &str,
-    extension: &str,
-    document: String,
-) -> Result<bool> {
-    let (send, receive) = oneshot::channel();
-    window
-        .dialog()
-        .file()
-        .set_title(title)
-        .set_parent(&window)
-        .set_file_name(name)
-        .add_filter(filter, &[extension])
-        .save_file(move |choice| {
-            if send.send(choice).is_err() {
-                tracing::debug!("Bucket export was cancelled");
-            }
-        });
-    let Some(choice) = receive
-        .await
-        .map_err(|error| AppError::File(error.to_string()))?
-    else {
-        return Ok(false);
-    };
-    let path = choice
-        .into_path()
-        .map_err(|error| AppError::File(error.to_string()))?;
-    tokio::task::spawn_blocking(move || write_text(&path, &document))
-        .await
-        .map_err(|error| AppError::File(error.to_string()))??;
-    Ok(true)
 }
 
 #[tauri::command]

@@ -1,12 +1,15 @@
 use std::sync::Arc;
 
-use tauri::{State, ipc::Channel};
+use tauri::{State, WebviewWindow, ipc::Channel};
 use uuid::Uuid;
 
 use crate::{
     audit::service::AuditService,
     bucket::workbench::{BucketTarget, validate_revision},
-    common::error::{AppError, Result},
+    common::{
+        document::save_text_document,
+        error::{AppError, Result},
+    },
     connection::{
         model::{IdentityKind, Workspace},
         service::ConnectionService,
@@ -14,6 +17,10 @@ use crate::{
 };
 
 use super::{
+    ceph_multisite::{
+        self, FlowScope, JournalPage, JournalScope, Observation, ProfileScope, Replication,
+        ReplicationScope, SyncStatus, Topology,
+    },
     ceph_operations::{self, Action, BucketOwner, IndexOutcome, Outcome},
     model::AdminRequest,
     private_access::{PrivateAccess, PrivateAccessChange, PrivateAccessService},
@@ -25,6 +32,51 @@ use super::{
     },
     service::AdministrationService,
 };
+
+#[tauri::command]
+pub async fn ceph_multisite_topology(
+    connections: State<'_, Arc<ConnectionService>>,
+    scope: ProfileScope,
+) -> Result<Topology> {
+    ceph_multisite::topology(&connections, scope).await
+}
+
+#[tauri::command]
+pub async fn ceph_multisite_flow(
+    connections: State<'_, Arc<ConnectionService>>,
+    scope: FlowScope,
+) -> Result<Observation<SyncStatus>> {
+    ceph_multisite::flow(&connections, scope).await
+}
+
+#[tauri::command]
+pub async fn ceph_multisite_replication(
+    connections: State<'_, Arc<ConnectionService>>,
+    scope: ReplicationScope,
+) -> Result<Replication> {
+    ceph_multisite::replication(&connections, scope).await
+}
+
+#[tauri::command]
+pub async fn ceph_multisite_journal(
+    connections: State<'_, Arc<ConnectionService>>,
+    scope: JournalScope,
+) -> Result<Observation<JournalPage>> {
+    ceph_multisite::journal(&connections, scope).await
+}
+
+#[tauri::command]
+pub async fn export_ceph_journal(window: WebviewWindow, document: String) -> Result<bool> {
+    save_text_document(
+        window,
+        "ceph-journal.csv",
+        "Export loaded journal rows",
+        "CSV document",
+        "csv",
+        document,
+    )
+    .await
+}
 
 #[tauri::command]
 pub async fn ceph_link_owner(

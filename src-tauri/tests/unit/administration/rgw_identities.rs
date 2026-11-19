@@ -30,7 +30,7 @@ use crate::{
 };
 
 #[derive(Clone, Default)]
-struct Keyring(Arc<Mutex<BTreeMap<Uuid, Secret>>>);
+pub(crate) struct Keyring(Arc<Mutex<BTreeMap<Uuid, Secret>>>);
 
 impl CredentialRepository for Keyring {
     fn read(&self, id: Uuid) -> Result<Secret> {
@@ -54,7 +54,7 @@ impl CredentialRepository for Keyring {
 
 type Fields = BTreeMap<String, String>;
 
-fn gateway(
+pub(crate) fn gateway(
     requests: usize,
     mut reply: impl FnMut(&str, &str, &Fields) -> (u16, String) + Send + 'static,
 ) -> (String, thread::JoinHandle<()>) {
@@ -78,6 +78,7 @@ fn gateway(
                         Err(error) => panic!("Expected RGW request: {error}"),
                     }
                 };
+                stream.set_nonblocking(false).unwrap();
                 stream
                     .set_read_timeout(Some(Duration::from_secs(2)))
                     .unwrap();

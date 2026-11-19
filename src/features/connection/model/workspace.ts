@@ -3,7 +3,7 @@ import { executionContext, identityAvailable, type Connection } from './connecti
 
 export type DesktopWorkspace = 'browser' | 'manager' | 'cephAdmin' | 'storageOps' | 'admin'
 export type ManagerPage = 'overview' | 'buckets' | 'featureRules' | 'access' | 'tools' | 'metrics'
-export type CephPage = 'overview' | 'buckets' | 'resources' | 'metrics' | 'health'
+export type CephPage = 'overview' | 'buckets' | 'resources' | 'metrics' | 'health' | 'multisite'
 export type AdminPage = 'overview' | 'connections' | 'preferences' | 'activity' | 'metrics' | 'health' | 'rgwIdentities'
 export type MetricPage = 'usage' | 'history' | 'traffic' | 'cost'
 export type CephGroup = 'Ceph accounts' | 'Ceph users' | 'Ceph buckets'
@@ -22,7 +22,7 @@ export const managerPages: Record<ManagerPage, string> = {
   overview: 'Overview', metrics: 'Usage & metrics', buckets: 'Buckets', featureRules: 'Feature rules', access: 'Access & topics', tools: 'Storage tools',
 }
 const cephPages: Record<CephPage, string> = {
-  overview: 'Overview', buckets: 'RGW buckets', resources: 'RGW resources', metrics: 'Usage & metrics', health: 'Endpoint health',
+  overview: 'Overview', buckets: 'RGW buckets', resources: 'RGW resources', metrics: 'Usage & metrics', health: 'Endpoint health', multisite: 'Multisite',
 }
 export const adminPages: Record<AdminPage, string> = {
   overview: 'Overview', metrics: 'Usage & metrics', health: 'Endpoint health', connections: 'Connections', preferences: 'Preferences', activity: 'Activity',

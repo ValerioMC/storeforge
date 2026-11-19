@@ -1,3 +1,4 @@
+mod ceph_multisite;
 mod ceph_operations;
 pub mod controller;
 mod iam_roles;
