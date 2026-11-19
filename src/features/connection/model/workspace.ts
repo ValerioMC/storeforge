@@ -3,7 +3,7 @@ import { validCostMonth } from '../../monitoring/model/storage-costs'
 import { executionContext, identityAvailable, type Connection } from './connection'
 
 export type DesktopWorkspace = 'browser' | 'manager' | 'cephAdmin' | 'storageOps' | 'admin'
-export type ManagerPage = 'overview' | 'buckets' | 'featureRules' | 'access' | 'tools' | 'metrics'
+export type ManagerPage = 'overview' | 'buckets' | 'featureRules' | 'access' | 'tools' | 'metrics' | 'activity'
 export type CephPage = 'overview' | 'buckets' | 'resources' | 'metrics' | 'health' | 'multisite'
 export type AdminPage = 'overview' | 'connections' | 'preferences' | 'activity' | 'metrics' | 'health' | 'rgwIdentities' | 'costs' | 'governance' | 'settings'
 export type MetricPage = 'usage' | 'history' | 'traffic' | 'cost'
@@ -20,7 +20,7 @@ export const workspaceNames: Record<DesktopWorkspace, string> = {
   browser: 'Browser', manager: 'Manager', cephAdmin: 'Ceph Admin', storageOps: 'Storage Ops', admin: 'Admin',
 }
 export const managerPages: Record<ManagerPage, string> = {
-  overview: 'Overview', metrics: 'Usage & metrics', buckets: 'Buckets', featureRules: 'Feature rules', access: 'Access & topics', tools: 'Storage tools',
+  overview: 'Overview', metrics: 'Usage & metrics', buckets: 'Buckets', featureRules: 'Feature rules', access: 'Access & topics', tools: 'Storage tools', activity: 'Manager activity',
 }
 const cephPages: Record<CephPage, string> = {
   overview: 'Overview', buckets: 'RGW buckets', resources: 'RGW resources', metrics: 'Usage & metrics', health: 'Endpoint health', multisite: 'Multisite',

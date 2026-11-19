@@ -152,6 +152,9 @@ pub enum InteractiveAction {
     SharedConnections,
     AccessReview,
     CostSettings,
+    NewWebhook,
+    ProviderAccessLogs,
+    EditWebhook { id: u64 },
     StorageEndpointSettings,
     ReviewUser { id: i64, search: String },
     ReviewGroup { id: i64, search: String },
@@ -171,11 +174,22 @@ impl InteractiveAction {
             Self::SharedConnections => "/admin/s3-connections",
             Self::AccessReview => "/admin/access-audit",
             Self::CostSettings => "/admin/cost-settings",
+            Self::NewWebhook => "/admin/webhook-settings/new",
+            Self::ProviderAccessLogs => "/portal/history?view=access",
+            Self::EditWebhook { .. } => "/admin/webhook-settings/",
             Self::StorageEndpointSettings => "/admin/storage-endpoints",
         };
         let mut url = origin
             .join(path)
             .map_err(|_| AppError::Invalid("Invalid browser action.".into()))?;
+        if let Self::EditWebhook { id } = self {
+            if *id == 0 {
+                return Err(AppError::Invalid("Select a webhook to edit.".into()));
+            }
+            url = url
+                .join(&id.to_string())
+                .map_err(|_| AppError::Invalid("Invalid webhook action.".into()))?;
+        }
         if let Self::ReviewUser { id, search } | Self::ReviewGroup { id, search } = self {
             if *id <= 0 {
                 return Err(AppError::Invalid("Select a principal to review.".into()));
@@ -190,7 +204,10 @@ impl InteractiveAction {
     pub fn admin_only(&self) -> bool {
         !matches!(
             self,
-            Self::AccountProfile | Self::AccountSecurity | Self::PrivateConnections
+            Self::AccountProfile
+                | Self::AccountSecurity
+                | Self::PrivateConnections
+                | Self::ProviderAccessLogs
         )
     }
 }

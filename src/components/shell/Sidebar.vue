@@ -21,6 +21,7 @@ const storageLinks = [
   { label: 'Usage & metrics', icon: Activity, destination: { workspace: 'manager', page: 'metrics' } },
   { label: 'Bucket inventory', icon: Database, destination: { workspace: 'manager', page: 'buckets' } },
   { label: 'Feature rules', icon: SlidersHorizontal, destination: { workspace: 'manager', page: 'featureRules' } },
+  { label: 'Manager activity', icon: Activity, destination: { workspace: 'manager', page: 'activity' } },
   { label: 'Storage tools', icon: FolderCog, destination: { workspace: 'manager', page: 'tools' } },
   { label: 'Storage Ops', icon: Layers, destination: { workspace: 'storageOps', page: 'overview' } },
 ] as const

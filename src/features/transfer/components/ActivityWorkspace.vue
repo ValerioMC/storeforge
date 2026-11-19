@@ -2,6 +2,7 @@
 import { computed, ref, watch } from 'vue'
 import { Activity, ArrowDownToLine, ArrowUpFromLine, ClipboardList, MoveRight } from 'lucide-vue-next'
 import { formatDate } from '../../../common/format'
+import SharedActivity from '../../audit/components/SharedActivity.vue'
 import AuditHistory from '../../audit/components/AuditHistory.vue'
 import EmptyState from '../../../components/ui/EmptyState.vue'
 import FadeRegion from '../../../components/ui/FadeRegion.vue'
@@ -10,11 +11,12 @@ import type { Job, JobStatus } from '../model/transfer'
 import TransferJobDetail from './TransferJobDetail.vue'
 import { useJobs } from '../store/jobs'
 
-const props = defineProps<{ demo: boolean; preselected: string | null; audit?: boolean }>()
-const emit = defineEmits<{ browse: [] }>()
+const props = defineProps<{ demo: boolean; preselected: string | null; audit?: boolean; manager?: boolean }>()
+const emit = defineEmits<{ browse: []; connections: [] }>()
 const store = useJobs()
-const view = ref<'Jobs' | 'Audit'>('Jobs')
-watch(() => props.audit, audit => { view.value = audit ? 'Audit' : 'Jobs' }, { immediate: true })
+const views = ['Jobs', 'Local audit', 'Shared service'] as const
+const view = ref<typeof views[number]>('Jobs')
+watch(() => [props.audit, props.preselected], () => { view.value = props.audit ? 'Local audit' : 'Jobs' }, { immediate: true })
 const filter = ref<'all' | JobStatus>('all')
 
 const demoJobs: Job[] = [
@@ -46,12 +48,13 @@ function jobIcon(label: string) {
 
 <template>
   <section class="workspace-page">
-    <div class="page-header"><div><h1>Activity</h1><p>Follow transfers and bulk jobs, with results for individual failures.</p></div><span class="context-chip"><Activity :size="17" /> {{ props.demo ? 'Demo activity' : 'This device' }}</span></div>
-    <nav class="workspace-tabs" aria-label="Activity views">
-      <button v-for="option in (['Jobs', 'Audit'] as const)" :key="option" :class="{ active: view === option }" :aria-pressed="view === option" @click="view = option">{{ option }}</button>
+    <div class="page-header"><div><h1>{{ manager ? 'Manager activity' : 'Activity' }}</h1><p>{{ manager ? 'Review actions in a shared storage context.' : 'Review transfers, local audit and shared service activity.' }}</p></div><span v-if="!manager && view !== 'Shared service'" class="context-chip"><Activity :size="17" /> {{ props.demo ? 'Demo activity' : 'This device' }}</span></div>
+    <nav v-if="!manager" class="workspace-tabs" aria-label="Activity views">
+      <button v-for="option in views" :key="option" :class="{ active: view === option }" :aria-pressed="view === option" @click="view = option">{{ option }}</button>
     </nav>
     <FadeRegion>
-      <div v-if="view === 'Audit'"><AuditHistory :demo="demo" /></div>
+      <SharedActivity v-if="manager || view === 'Shared service'" :manager="manager" @connections="emit('connections')" />
+      <div v-else-if="view === 'Local audit'"><AuditHistory :demo="demo" /></div>
       <div v-else>
         <nav class="workspace-tabs activity-filters" aria-label="Filter activity">
           <button v-for="group in groups" :key="group.id" :class="{ active: group.id === filter }" :aria-pressed="group.id === filter" @click="filter = group.id">{{ group.label }} <span class="tab-count">{{ group.count }}</span></button>

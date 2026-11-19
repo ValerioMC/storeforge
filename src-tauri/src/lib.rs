@@ -18,7 +18,7 @@ use administration::{
     rgw_identities::RgwIdentityService, service::AdministrationService,
     workspace_settings::controller as settings_commands,
 };
-use audit::{controller as audit_commands, service::AuditService};
+use audit::{controller as audit_commands, operational_events::controller as operational_commands, service::AuditService};
 use bucket::controller as bucket_commands;
 use connection::shared_service::{controller as shared_service_commands, service::SharedService};
 use connection::{
@@ -157,6 +157,18 @@ pub fn run() {
             administration_commands::ceph_multisite_journal,
             administration_commands::export_ceph_journal,
             audit_commands::list_audit,
+            operational_commands::operational_events,
+            operational_commands::operational_inbox,
+            operational_commands::read_operational_notifications,
+            operational_commands::operational_quota_preferences,
+            operational_commands::test_operational_smtp,
+            operational_commands::operational_webhooks,
+            operational_commands::operational_webhook_deliveries,
+            operational_commands::operational_health,
+            operational_commands::operational_usage_history,
+            operational_commands::operational_bucket_usage,
+            operational_commands::operational_cost_history,
+            operational_commands::collect_operational_usage_history,
             monitoring_commands::monitoring_cached,
             monitoring_commands::monitoring_collect,
             monitoring_commands::monitoring_check,

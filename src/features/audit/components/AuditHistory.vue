@@ -50,12 +50,12 @@ async function load(): Promise<void> {
 
 <template>
   <div class="inline between audit-controls">
-    <label class="object-search"><Search :size="16" /><input v-model="query" type="search" aria-label="Filter audit history" placeholder="Filter history" /></label>
+    <label class="object-search"><Search :size="16" /><input v-model="query" type="search" aria-label="Filter local audit history" placeholder="Filter local history" /></label>
     <button :disabled="busy" @click="load"><RefreshCw :size="16" /> Refresh history</button>
   </div>
   <Notice v-if="error" tone="error">{{ error }}</Notice>
   <p v-if="busy" class="loading-line" role="status">Loading audit history…</p>
-  <EmptyState v-else-if="!visible.length" :icon="ClipboardCheck" :title="query ? 'No matching actions' : 'No audit entries yet'" description="Bucket and object changes and administration requests appear here." />
+  <EmptyState v-else-if="!visible.length" :icon="ClipboardCheck" :title="query ? 'No matching actions' : 'No audit entries yet'" description="Bucket, object and administration requests made from this desktop appear here." />
   <div v-else class="settings-sheet">
     <div v-for="event in visible" :key="event.id" class="settings-row">
       <span class="file-icon"><ClipboardCheck :size="16" /></span>
