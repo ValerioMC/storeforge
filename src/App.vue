@@ -14,6 +14,7 @@ import BrowserWorkspace from './features/browser/components/BrowserWorkspace.vue
 import type { Location } from './features/browser/model/objects'
 import { demoConnection } from './features/browser/model/demo'
 import { useBrowser } from './features/browser/store/browser'
+import BucketWorkbench from './features/bucket/components/BucketWorkbench.vue'
 import BucketRulesWorkspace from './features/bucket/components/BucketRulesWorkspace.vue'
 import ManagerWorkspace from './features/bucket/components/ManagerWorkspace.vue'
 import NewBucketDialog from './features/bucket/components/NewBucketDialog.vue'
@@ -21,9 +22,9 @@ import ConnectionEditor from './features/connection/components/ConnectionEditor.
 import ConnectionsWorkspace from './features/connection/components/ConnectionsWorkspace.vue'
 import WorkspaceHelp from './features/connection/components/WorkspaceHelp.vue'
 import WorkspacePreferences from './features/connection/components/WorkspacePreferences.vue'
-import { providerNames, type Connection } from './features/connection/model/connection'
+import { identityAvailable, providerNames, type Connection } from './features/connection/model/connection'
 import { pausedSetup } from './features/connection/model/setup-draft'
-import { defaultRoute, routeTitle, workspaceAvailable, workspaceNames, type WorkspaceDestination, type WorkspaceRoute } from './features/connection/model/workspace'
+import { defaultRoute, isWorkspaceRoute, routeTitle, workspaceAvailable, workspaceNames, type WorkspaceDestination, type WorkspaceRoute } from './features/connection/model/workspace'
 import { useConnections } from './features/connection/store/connections'
 import { useWorkspaceNavigation } from './features/connection/store/workspace-navigation'
 import MonitoringWorkspace from './features/monitoring/components/MonitoringWorkspace.vue'
@@ -48,6 +49,8 @@ const startup = ref(window.localStorage.getItem('storeforge.startupContext') ?? 
 const startError = ref('')
 const browserView = ref<InstanceType<typeof BrowserWorkspace>>()
 const managerView = ref<InstanceType<typeof ManagerWorkspace>>()
+const workbenchView = ref<InstanceType<typeof BucketWorkbench>>()
+const bucketEditor = computed(() => workbenchRoute.value?.target ? workbenchView.value : managerView.value)
 const departure = ref<() => void>()
 const demo = computed(() => connections.activeId === 'demo')
 const contextOptions = computed(() => [
@@ -65,10 +68,30 @@ const managerRoute = computed(() => route.value.workspace === 'manager' ? route.
 const monitoringRoute = computed(() => {
   const current = route.value
   if (current.workspace === 'manager' && (current.page === 'overview' || current.page === 'metrics')) return { workspace: current.workspace, pane: current.page, metric: current.metric }
-  if (current.workspace === 'cephAdmin' && current.page !== 'resources') return { workspace: current.workspace, pane: current.page ?? 'overview', metric: current.metric }
+  if (current.workspace === 'cephAdmin' && current.page !== 'resources' && current.page !== 'buckets') return { workspace: current.workspace, pane: current.page ?? 'overview', metric: current.metric }
   if (current.workspace === 'admin' && (current.page === 'overview' || current.page === 'metrics' || current.page === 'health')) return { workspace: current.workspace, pane: current.page, metric: current.metric }
   return undefined
 })
+const workbenchRoute = computed(() => {
+  const current = route.value
+  if (current.workspace === 'storageOps') return { source: current.workspace, pane: current.page, target: current.workbenchBucket, bucket: undefined } as const
+  if (current.workspace === 'cephAdmin' && current.page === 'buckets') {
+    return { source: current.workspace, pane: current.page, target: current.workbenchBucket, bucket: current.bucket } as const
+  }
+  return undefined
+})
+const workbenchProfiles = computed(() => {
+  if (demo.value) return [demoConnection]
+  if (workbenchRoute.value?.source === 'storageOps') return managerProfiles.value
+  const active = connections.active
+  return active && identityAvailable(active, 'cephAdmin') ? [active] : []
+})
+const workbenchLink = computed(() => {
+  const url = new URL(window.location.href)
+  url.hash = new URLSearchParams({ bucketWorkbench: JSON.stringify(route.value) }).toString()
+  return url.href
+})
+
 const toolsLocation = computed(() => ({
   connection: browser.location.connection,
   bucket: managerRoute.value?.bucket ?? browser.bucket,
@@ -106,6 +129,7 @@ onMounted(() => {
   mounted = true
   void initialize()
   window.addEventListener('keydown', keydown)
+  window.addEventListener('hashchange', followWorkbenchLink)
   window.addEventListener('beforeunload', beforeUnload)
   if (isTauri()) {
     timer = window.setInterval(() => void jobs.load(), 1200)
@@ -118,6 +142,7 @@ onUnmounted(() => {
   unlistenClose?.()
   if (timer !== undefined) window.clearInterval(timer)
   window.removeEventListener('keydown', keydown)
+  window.removeEventListener('hashchange', followWorkbenchLink)
   window.removeEventListener('beforeunload', beforeUnload)
 })
 
@@ -145,9 +170,35 @@ async function initialize(): Promise<void> {
   const preferred = findProfile(startup.value)
   const fallback = defaultRoute(preferred ?? connections.active)
   navigation.initialize(fallback, routeAllowed)
+  if (followWorkbenchLink()) {
+    await jobs.load()
+    return
+  }
   if (new URLSearchParams(window.location.search).get('demo') === '1') openDemo()
   else if (preferred) navigation.go(fallback)
   await jobs.load()
+}
+
+function followWorkbenchLink(): boolean {
+  const value = new URLSearchParams(window.location.hash.slice(1)).get('bucketWorkbench')
+  if (!value) return false
+  try {
+    const candidate: unknown = JSON.parse(value)
+    if (!isWorkspaceRoute(candidate) || !('workbenchBucket' in candidate) ||
+      (candidate.workspace !== 'storageOps' && candidate.workspace !== 'cephAdmin') || !routeAllowed(candidate)) return false
+    openRoute(candidate)
+    return true
+  } catch (failure) {
+    startError.value = errorMessage(failure)
+    return false
+  }
+}
+
+function inspectWorkbenchBucket(key?: string): void {
+  const current = workbenchRoute.value
+  if (!current) return
+  const destination = { workspace: current.source, page: 'buckets' as const }
+  go(key ? { ...destination, workbenchBucket: key } : destination)
 }
 
 function synchronize(destination: WorkspaceRoute): void {
@@ -168,28 +219,27 @@ function synchronize(destination: WorkspaceRoute): void {
 }
 
 function leavingBucket(action: () => void): void {
-  const detail = route.value.workspace === 'manager' && route.value.page === 'buckets' && route.value.bucket
-  if (detail && managerView.value?.busy) return
-  if (detail && managerView.value?.dirty) departure.value = action
+  if (bucketEditor.value?.busy) return
+  if (bucketEditor.value?.dirty) departure.value = action
   else action()
 }
 
 function finishDeparture(): void {
   const action = departure.value
   departure.value = undefined
-  managerView.value?.discard()
+  bucketEditor.value?.discard()
   action?.()
 }
 
 function beforeUnload(event: BeforeUnloadEvent): void {
-  if (!closing && managerView.value?.dirty) event.preventDefault()
+  if (!closing && bucketEditor.value?.dirty) event.preventDefault()
 }
 
 async function watchWindowClose(): Promise<void> {
   try {
     const windowHandle = getCurrentWindow()
     const unlisten = await windowHandle.onCloseRequested(event => {
-      if (closing || !managerView.value?.dirty && !managerView.value?.busy) return
+      if (closing || !bucketEditor.value?.dirty && !bucketEditor.value?.busy) return
       event.preventDefault()
       leavingBucket(() => {
         closing = true
@@ -259,6 +309,7 @@ function openMonitoringDestination(destination: WorkspaceDestination, connection
 function openWorkspaceRoot(): void {
   if (route.value.workspace === 'browser') openBucket('')
   else if (route.value.workspace === 'manager') go({ workspace: 'manager', page: 'overview' })
+  else if (route.value.workspace === 'storageOps') go({ workspace: 'storageOps', page: 'overview' })
   else if (route.value.workspace === 'cephAdmin') go({ workspace: 'cephAdmin', page: 'overview' })
   else if (route.value.workspace === 'admin') go({ workspace: 'admin', page: 'overview' })
 }
@@ -348,7 +399,7 @@ function showJob(id: string): void {
           <WindowControls v-if="windowChrome === 'custom'" @error="startError = $event" />
         </header>
         <nav class="shell-breadcrumbs" aria-label="Workspace breadcrumb">
-          <button v-if="resource || route.workspace === 'manager' || route.workspace === 'admin' || route.workspace === 'cephAdmin'"
+          <button v-if="resource || route.workspace === 'manager' || route.workspace === 'admin' || route.workspace === 'cephAdmin' || route.workspace === 'storageOps'"
             type="button" class="subtle" @click="openWorkspaceRoot">{{ workspaceNames[route.workspace] }}</button>
           <span v-else :aria-current="routeTitle(route) === workspaceNames[route.workspace] ? 'page' : undefined">{{ workspaceNames[route.workspace] }}</span>
           <template v-if="routeTitle(route) !== workspaceNames[route.workspace]">
@@ -363,13 +414,19 @@ function showJob(id: string): void {
 
       <div class="work-area">
         <FadeRegion>
-          <KeepAlive include="BrowserWorkspace,ManagerWorkspace,MonitoringWorkspace,ActivityWorkspace,ToolsWorkspace" :max="12">
+          <KeepAlive include="BrowserWorkspace,ManagerWorkspace,MonitoringWorkspace,ActivityWorkspace,ToolsWorkspace,BucketWorkbench" :max="12">
             <BrowserWorkspace v-if="route.workspace === 'browser'" key="browser" ref="browserView" :demo="demo" :compact="compact" @add="openEditor()"
               @demo="openDemo" @create-bucket="creatingBucket = true" @tools="go({ workspace: 'manager', page: 'tools' })" @job="jobStarted" @navigate="openBucket" @favorite="openFavorite" />
             <MonitoringWorkspace v-else-if="monitoringRoute" :key="`monitoring:${monitoringRoute.workspace}:${monitoringRoute.pane}:${connections.contextKey}`"
               :workspace="monitoringRoute.workspace" :pane="monitoringRoute.pane" :metric="monitoringRoute.metric"
               :profile="connections.active" :profiles="connections.profiles" :compact="compact"
               @open="openMonitoringDestination" @create="creatingBucket = true" />
+            <BucketWorkbench v-else-if="workbenchRoute" ref="workbenchView"
+              :key="`workbench:${workbenchRoute.source}:${workbenchRoute.source === 'cephAdmin' ? connections.contextKey : demo}`"
+              :source="workbenchRoute.source" :pane="workbenchRoute.pane" :target="workbenchRoute.target" :initial-bucket="workbenchRoute.bucket"
+              :profiles="workbenchProfiles" :compact="compact" :link="workbenchLink"
+              @overview="go({ workspace: 'storageOps', page: 'overview' })" @inventory="inspectWorkbenchBucket()"
+              @inspect="inspectWorkbenchBucket" @connections="go({ workspace: 'admin', page: 'connections' })" />
             <ManagerWorkspace v-else-if="managerRoute?.page === 'buckets' && connections.active" ref="managerView"
               :key="`manager:${connections.contextKey}`" :profile="connections.active" :bucket="managerRoute.bucket" :notification-topic="managerRoute.notificationTopic"
               :demo="demo" :browse-available="canBrowse" :compact="compact" @inventory="go({ workspace: 'manager', page: 'buckets' })"

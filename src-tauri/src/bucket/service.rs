@@ -18,8 +18,37 @@ pub struct BucketService;
 
 impl BucketService {
     pub async fn list(session: &Session) -> Result<Vec<Bucket>> {
+        let mut output = Vec::new();
+        Self::list_pages(session, |page| {
+            output.extend(page);
+            Ok(())
+        })
+        .await?;
+        if session.profile.provider == Provider::Aws && session.profile.known_buckets.is_empty() {
+            output.sort_by(|left, right| left.name.cmp(&right.name));
+        }
+        Ok(output)
+    }
+
+    pub async fn list_pages(
+        session: &Session,
+        mut receive: impl FnMut(Vec<Bucket>) -> Result<()>,
+    ) -> Result<()> {
         if !session.profile.known_buckets.is_empty() {
-            return Self::list_known(session).await;
+            for name in &session.profile.known_buckets {
+                session
+                    .s3
+                    .head_bucket()
+                    .bucket(name)
+                    .send()
+                    .await
+                    .map_err(storage_error)?;
+                receive(vec![Bucket {
+                    name: name.clone(),
+                    created_at: None,
+                }])?;
+            }
+            return Ok(());
         }
         if session.profile.provider != Provider::Aws {
             let page = session
@@ -28,33 +57,13 @@ impl BucketService {
                 .send()
                 .await
                 .map_err(storage_error)?;
-            return Ok(bucket_rows(page.buckets()));
+            return receive(bucket_rows(page.buckets()));
         }
-        let mut output = Vec::new();
         let mut pages = session.s3.list_buckets().into_paginator().send();
         while let Some(page) = pages.next().await {
-            output.extend(bucket_rows(page.map_err(storage_error)?.buckets()));
+            receive(bucket_rows(page.map_err(storage_error)?.buckets()))?;
         }
-        output.sort_by(|left, right| left.name.cmp(&right.name));
-        Ok(output)
-    }
-
-    async fn list_known(session: &Session) -> Result<Vec<Bucket>> {
-        let mut buckets = Vec::new();
-        for name in &session.profile.known_buckets {
-            session
-                .s3
-                .head_bucket()
-                .bucket(name)
-                .send()
-                .await
-                .map_err(storage_error)?;
-            buckets.push(Bucket {
-                name: name.clone(),
-                created_at: None,
-            });
-        }
-        Ok(buckets)
+        Ok(())
     }
 
     pub async fn create(

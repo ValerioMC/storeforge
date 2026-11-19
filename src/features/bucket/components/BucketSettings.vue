@@ -7,7 +7,7 @@ import FadeRegion from '../../../components/ui/FadeRegion.vue'
 import Notice from '../../../components/ui/Notice.vue'
 import { bucketsApi } from '../api/buckets'
 import { useBucketConfiguration } from '../composables/useBucketConfiguration'
-import type { Configuration } from '../model/bucket'
+import type { Configuration, ConfigurationChange } from '../model/bucket'
 import { configurations } from '../model/configuration'
 import type { JsonValue } from '../model/policy-document'
 import { configurationGroups, configurationLabel, extractRules, parseConfiguration, setLifecycleRuleStatus } from '../model/workspace'
@@ -17,7 +17,7 @@ import BucketBackupDialog from './BucketBackupDialog.vue'
 import PolicySettingsForm from './PolicySettingsForm.vue'
 import XmlSettingsForm from './XmlSettingsForm.vue'
 
-const props = defineProps<{ connection: string; bucket: string; demo: boolean; managed?: boolean; notificationTopic?: string }>()
+const props = defineProps<{ connection: string; bucket: string; demo: boolean; managed?: boolean; notificationTopic?: string; scopedRequest?: (section: Configuration, change: ConfigurationChange) => Promise<string> }>()
 const emit = defineEmits<{ removed: []; changed: [] }>()
 const configuration = ref<Configuration>(props.notificationTopic ? 'notification' : 'versioning')
 const current = computed(() => configurations.find(item => item.id === configuration.value)!)
@@ -67,10 +67,10 @@ watch([configuration, () => state.value.draft], ([section, draft]) => {
 }, { immediate: true })
 
 function newEditors() {
-  const { connection, bucket, demo } = props
+  const { connection, bucket, demo, scopedRequest } = props
   return useBucketConfiguration((section, change) => {
     if (demo) return Promise.resolve(configurations.find(item => item.id === section)!.example)
-    return bucketsApi.configure(connection, bucket, section, change)
+    return scopedRequest ? scopedRequest(section, change) : bucketsApi.configure(connection, bucket, section, change)
   })
 }
 
@@ -242,10 +242,10 @@ defineExpose({
         </div>
       </FadeRegion>
     </div>
-    <div class="danger-zone"><div><h3>Delete empty bucket</h3><p>Remove the bucket after all objects and versions have been removed.</p></div>
+    <div v-if="!scopedRequest" class="danger-zone"><div><h3>Delete empty bucket</h3><p>Remove the bucket after all objects and versions have been removed.</p></div>
       <button :disabled="demo || busy" class="danger-outline" @click="confirm = 'bucket'"><Trash2 :size="16" /> Delete bucket</button>
     </div>
-    <BucketBackupDialog v-if="backup" :mode="backup" :connection="connection" :bucket="bucket" :editors="editors"
+    <BucketBackupDialog v-if="backup" :mode="backup" :connection="connection" :bucket="bucket" :editors="editors" :scoped-request="scopedRequest"
       @close="backup = undefined" @changed="emit('changed')" />
     <ConfirmDialog v-if="confirm" :title="confirm === 'write' ? `Update ${current.label.toLowerCase()}?` : confirm === 'bucket' ? 'Delete bucket?' : 'Remove configuration?'"
       :description="confirm === 'bucket' ? `${bucket} will be removed from the selected endpoint.` : `This applies to the ${bucket} bucket on the selected connection.`"

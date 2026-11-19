@@ -1,6 +1,6 @@
 use std::{fs::File, io::Read, sync::Arc};
 
-use tauri::{State, WebviewWindow};
+use tauri::{State, WebviewWindow, ipc::Channel};
 use tauri_plugin_dialog::DialogExt;
 use tokio::sync::oneshot;
 use uuid::Uuid;
@@ -23,6 +23,7 @@ use super::{
     },
     quota, repository,
     service::BucketService,
+    workbench::{self, BucketTarget, InventoryBucket, InventorySource},
 };
 
 #[tauri::command]
@@ -31,6 +32,70 @@ pub async fn list_buckets(
     connection: Uuid,
 ) -> Result<Vec<Bucket>> {
     BucketService::list(&connections.session(connection)?).await
+}
+
+#[tauri::command]
+pub async fn bucket_workbench_inventory(
+    connections: State<'_, Arc<ConnectionService>>,
+    connection: Uuid,
+    revision: Option<Uuid>,
+    source: InventorySource,
+    pages: Channel<Vec<InventoryBucket>>,
+) -> Result<()> {
+    let session = connections.session_for(connection, source.workspace(), source.identity())?;
+    workbench::validate_revision(&session, revision)?;
+    if source == InventorySource::StorageOps && !session.profile.settings.manager_enabled {
+        return Err(AppError::Invalid(
+            "Storage Ops is unavailable for this connection.".into(),
+        ));
+    }
+    workbench::list(&session, source, |page| {
+        pages
+            .send(page)
+            .map_err(|_| AppError::Invalid("The bucket inventory was closed.".into()))
+    })
+    .await
+}
+
+#[tauri::command]
+pub async fn bucket_workbench_configuration(
+    audit: State<'_, AuditService>,
+    connections: State<'_, Arc<ConnectionService>>,
+    target: BucketTarget,
+    configuration: Configuration,
+    change: ConfigurationChange,
+) -> Result<String> {
+    let session = workbench_session(&connections, &target, IdentityKind::S3).await?;
+    let write = !matches!(change, ConfigurationChange::Read);
+    let result = repository::configure(&session, &target.name, configuration, change).await;
+    if write {
+        return audit.record(
+            target.connection,
+            "Change bucket settings",
+            Some(target.name),
+            result,
+        );
+    }
+    result
+}
+
+async fn workbench_session(
+    connections: &ConnectionService,
+    target: &BucketTarget,
+    identity: IdentityKind,
+) -> Result<crate::connection::service::Session> {
+    let session =
+        connections.session_for(target.connection, target.source.workspace(), identity)?;
+    workbench::validate_target(&session, target)?;
+    if target.source == InventorySource::CephAdmin {
+        let gateway = connections.session_for(
+            target.connection,
+            Workspace::CephAdmin,
+            IdentityKind::CephAdmin,
+        )?;
+        workbench::validate_instance(&gateway, target).await?;
+    }
+    Ok(session)
 }
 
 #[tauri::command]
@@ -125,17 +190,67 @@ pub async fn export_bucket_configuration(
         None | Some(Configuration::Policy) => ("JSON document", "json"),
         Some(_) => ("XML document", "xml"),
     };
+    save_bucket_text(
+        window,
+        &name,
+        "Export bucket configuration",
+        filter,
+        extension,
+        document,
+    )
+    .await
+}
+
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum InventoryExport {
+    Text,
+    Csv,
+    Json,
+}
+
+#[tauri::command]
+pub async fn export_bucket_inventory(
+    window: WebviewWindow,
+    format: InventoryExport,
+    document: String,
+) -> Result<bool> {
+    let (filter, extension) = match format {
+        InventoryExport::Text => ("Text document", "txt"),
+        InventoryExport::Csv => ("CSV document", "csv"),
+        InventoryExport::Json => ("JSON document", "json"),
+    };
+    let name = format!("bucket-selection.{extension}");
+    save_bucket_text(
+        window,
+        &name,
+        "Export bucket selection",
+        filter,
+        extension,
+        document,
+    )
+    .await
+}
+
+async fn save_bucket_text(
+    window: WebviewWindow,
+    name: &str,
+    title: &str,
+    filter: &str,
+    extension: &str,
+    document: String,
+) -> Result<bool> {
     let (send, receive) = oneshot::channel();
     window
         .dialog()
         .file()
-        .set_title("Export bucket configuration")
+        .set_title(title)
         .set_parent(&window)
         .set_file_name(name)
         .add_filter(filter, &[extension])
         .save_file(move |choice| {
             if send.send(choice).is_err() {
-                tracing::debug!("Bucket configuration export was cancelled");
+                tracing::debug!("Bucket export was cancelled");
             }
         });
     let Some(choice) = receive

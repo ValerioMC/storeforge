@@ -3,3 +3,4 @@ pub mod model;
 mod quota;
 pub mod repository;
 pub mod service;
+pub mod workbench;

@@ -11,6 +11,7 @@ defineEmits<{ close: [] }>()
     <div class="modal-form">
       <p v-if="workspace === 'browser'">Select a bucket, open a folder, or filter the loaded objects. Selecting a row opens its inspector. Checkboxes select objects for batch actions.</p>
       <p v-else-if="workspace === 'manager'">Open a bucket from the inventory to inspect its details and configuration. Storage tools use the source bucket and prefix shown on the page.</p>
+      <p v-else-if="workspace === 'storageOps'">Open a storage context or filter the combined bucket inventory. Selections apply to the connection shown on each row.</p>
       <p v-else-if="workspace === 'cephAdmin'">Accounts and users use Admin Ops credentials. Monitoring uses Supervision credentials. Bucket and multisite actions use the dedicated Ceph Admin identity.</p>
       <p v-else>Set up a profile to connect to S3 or Ceph RGW. Check credentials before applying a profile. Workspace visibility and service identities are configured per profile.</p>
       <dl class="setup-summary">

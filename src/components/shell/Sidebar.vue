@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
-import { Activity, Box, Cable, ChevronDown, Database, FolderCog, KeyRound, LayoutDashboard, Plus, Search, Settings2, ShieldCheck, SlidersHorizontal, Star, Users } from 'lucide-vue-next'
+import { Activity, Box, Cable, ChevronDown, Database, FolderCog, KeyRound, LayoutDashboard, Layers, Plus, Search, Settings2, ShieldCheck, SlidersHorizontal, Star, Users } from 'lucide-vue-next'
 import icon from '../../assets/storeforge.png'
 import { useBrowser } from '../../features/browser/store/browser'
 import { useConnections } from '../../features/connection/store/connections'
@@ -22,6 +22,7 @@ const storageLinks = [
   { label: 'Bucket inventory', icon: Database, destination: { workspace: 'manager', page: 'buckets' } },
   { label: 'Feature rules', icon: SlidersHorizontal, destination: { workspace: 'manager', page: 'featureRules' } },
   { label: 'Storage tools', icon: FolderCog, destination: { workspace: 'manager', page: 'tools' } },
+  { label: 'Storage Ops', icon: Layers, destination: { workspace: 'storageOps', page: 'overview' } },
 ] as const
 const adminLinks = [
   { label: 'Access & topics', icon: KeyRound, destination: { workspace: 'manager', page: 'access' } },
@@ -54,6 +55,7 @@ function setGroup(id: keyof typeof expanded.value, event: Event): void {
 
 function activeLink(destination: WorkspaceDestination): boolean {
   if (props.route.workspace !== destination.workspace) return false
+  if (destination.workspace === 'storageOps') return true
   if ('page' in destination) return 'page' in props.route && props.route.page === destination.page
   return true
 }

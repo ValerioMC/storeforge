@@ -18,7 +18,7 @@ struct BucketStats {
 }
 
 #[derive(Deserialize, Serialize)]
-struct QuotaDocument {
+pub(super) struct QuotaDocument {
     enabled: bool,
     #[serde(default)]
     check_on_raw: bool,
@@ -30,7 +30,7 @@ struct QuotaDocument {
 }
 
 impl QuotaDocument {
-    fn editor_values(&self) -> Result<BucketQuota> {
+    pub(super) fn editor_values(&self) -> Result<BucketQuota> {
         let bytes = self
             .max_size
             .or_else(|| {

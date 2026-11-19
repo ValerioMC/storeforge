@@ -41,7 +41,7 @@ pub struct BucketCreation {
     pub versioning_error: Option<String>,
 }
 
-#[derive(Deserialize, PartialEq, Serialize)]
+#[derive(Clone, Deserialize, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct BucketQuota {
     pub enabled: bool,

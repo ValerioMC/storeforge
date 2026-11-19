@@ -96,7 +96,7 @@ function openHealth(connection: string): void {
 
 function openBucket(bucket: string): void {
   if (workspaceAvailable(target.value, 'manager')) open({ workspace: 'manager', page: 'buckets', bucket })
-  else open({ workspace: 'cephAdmin', page: 'resources', group: 'Ceph buckets', bucket })
+  else open({ workspace: 'cephAdmin', page: 'buckets', bucket })
 }
 
 function refresh(): void {
@@ -161,7 +161,7 @@ function refresh(): void {
       <div class="monitoring-grid monitoring-admin-health"><HealthPanel :endpoints="endpointRows" @open="openHealth" /></div>
       <nav class="monitoring-shortcuts" aria-label="Ceph resources">
         <button @click="openMetric('usage')"><Activity :size="17" /> Usage & metrics <ArrowUpRight :size="14" /></button>
-        <button v-for="item in shortcuts" :key="item.group" @click="open({ workspace: 'cephAdmin', page: 'resources', group: item.group })">
+        <button v-for="item in shortcuts" :key="item.group" @click="open(item.group === 'Ceph buckets' ? { workspace: 'cephAdmin', page: 'buckets' } : { workspace: 'cephAdmin', page: 'resources', group: item.group })">
           <component :is="item.icon" :size="17" /> {{ item.label }} <ArrowUpRight :size="14" />
         </button>
       </nav>

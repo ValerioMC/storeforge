@@ -5,11 +5,11 @@ import Modal from '../../../components/ui/Modal.vue'
 import Notice from '../../../components/ui/Notice.vue'
 import { bucketsApi } from '../api/buckets'
 import type { useBucketConfiguration } from '../composables/useBucketConfiguration'
-import type { Configuration } from '../model/bucket'
+import type { Configuration, ConfigurationChange } from '../model/bucket'
 import { configurations } from '../model/configuration'
 import { readBackup, readConfiguration, scanConfigurations, type BucketBackup, type ConfigurationReading } from '../model/workspace'
 
-const props = defineProps<{ connection: string; bucket: string; mode: 'export' | 'restore'; editors: ReturnType<typeof useBucketConfiguration> }>()
+const props = defineProps<{ connection: string; bucket: string; mode: 'export' | 'restore'; editors: ReturnType<typeof useBucketConfiguration>; scopedRequest?: (section: Configuration, change: ConfigurationChange) => Promise<string> }>()
 const emit = defineEmits<{ close: []; changed: [] }>()
 const backup = shallowRef<BucketBackup>()
 const selection = ref<Configuration[]>([])
@@ -36,7 +36,7 @@ async function load(): Promise<void> {
       backup.value = readBackup(source)
     }
     await scanConfigurations([props.bucket], sections.value.map(({ id }) => id),
-      (bucket, section) => bucketsApi.configure(props.connection, bucket, section, { action: 'read' }),
+      requestConfiguration,
       (_, section, reading) => { readings.value[section] = reading }, () => true)
     selection.value = sections.value.filter(({ id }) => eligible(id) && (exporting.value || backup.value?.bucket === props.bucket)).map(({ id }) => id)
   } catch (failure) {
@@ -44,6 +44,11 @@ async function load(): Promise<void> {
   } finally {
     busy.value = false
   }
+}
+
+function requestConfiguration(bucket: string, section: Configuration): Promise<string> {
+  return props.scopedRequest ? props.scopedRequest(section, { action: 'read' }) :
+    bucketsApi.configure(props.connection, bucket, section, { action: 'read' })
 }
 
 function currentDocument(section: Configuration): string {
@@ -110,7 +115,7 @@ async function restore(selected: Configuration[]): Promise<void> {
 }
 
 async function readCurrent(section: Configuration): Promise<ConfigurationReading> {
-  return readConfiguration((bucket, configuration) => bucketsApi.configure(props.connection, bucket, configuration, { action: 'read' }), props.bucket, section)
+  return readConfiguration(requestConfiguration, props.bucket, section)
 }
 </script>
 
