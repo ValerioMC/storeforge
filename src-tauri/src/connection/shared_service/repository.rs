@@ -71,13 +71,34 @@ impl SharedServiceRepository {
         token: &str,
         draft: &D,
     ) -> Result<T> {
-        let body = serde_json::to_vec(draft)?;
-        let request = self
+        Self::json(self.change_request(method, origin, path, token, draft)?).await
+    }
+
+    pub async fn long_change<T: DeserializeOwned, D: Serialize>(
+        &self,
+        method: Method,
+        origin: &Url,
+        path: &str,
+        token: &str,
+        draft: &D,
+    ) -> Result<T> {
+        let request = self.change_request(method, origin, path, token, draft)?;
+        Self::json(request.timeout(Duration::from_secs(600))).await
+    }
+
+    fn change_request<D: Serialize>(
+        &self,
+        method: Method,
+        origin: &Url,
+        path: &str,
+        token: &str,
+        draft: &D,
+    ) -> Result<RequestBuilder> {
+        Ok(self
             .request(method, origin, path, Some(token))?
             .header(header::ACCEPT, "application/json")
             .header(header::CONTENT_TYPE, "application/json")
-            .body(body);
-        Self::json(request).await
+            .body(serde_json::to_vec(draft)?))
     }
 
     pub async fn csv<Q: Serialize>(

@@ -11,6 +11,7 @@ export type SharedWorkspace = 'manager' | 'browser'
 export type ServiceWorkspace = SharedWorkspace | 'admin' | 'cephAdmin' | 'storageOps' | 'portal'
 export type SharedAction = 'accountProfile' | 'accountSecurity' | 'privateConnections' | 'identitySecurity' |
   'apiTokens' | 'authenticationSettings' | 'adminUsers' | 'adminGroups' | 'sharedConnections' | 'accessReview' |
+  'costSettings' | 'storageEndpointSettings' |
   { reviewUser: { id: number; search: string } } | { reviewGroup: { id: number; search: string } }
 
 export interface SharedPrincipal {

@@ -151,6 +151,8 @@ pub enum InteractiveAction {
     AdminGroups,
     SharedConnections,
     AccessReview,
+    CostSettings,
+    StorageEndpointSettings,
     ReviewUser { id: i64, search: String },
     ReviewGroup { id: i64, search: String },
 }
@@ -168,6 +170,8 @@ impl InteractiveAction {
             Self::AdminGroups | Self::ReviewGroup { .. } => "/admin/groups",
             Self::SharedConnections => "/admin/s3-connections",
             Self::AccessReview => "/admin/access-audit",
+            Self::CostSettings => "/admin/cost-settings",
+            Self::StorageEndpointSettings => "/admin/storage-endpoints",
         };
         let mut url = origin
             .join(path)

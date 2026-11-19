@@ -5,7 +5,7 @@ import { executionContext, identityAvailable, type Connection } from './connecti
 export type DesktopWorkspace = 'browser' | 'manager' | 'cephAdmin' | 'storageOps' | 'admin'
 export type ManagerPage = 'overview' | 'buckets' | 'featureRules' | 'access' | 'tools' | 'metrics'
 export type CephPage = 'overview' | 'buckets' | 'resources' | 'metrics' | 'health' | 'multisite'
-export type AdminPage = 'overview' | 'connections' | 'preferences' | 'activity' | 'metrics' | 'health' | 'rgwIdentities' | 'costs' | 'governance'
+export type AdminPage = 'overview' | 'connections' | 'preferences' | 'activity' | 'metrics' | 'health' | 'rgwIdentities' | 'costs' | 'governance' | 'settings'
 export type MetricPage = 'usage' | 'history' | 'traffic' | 'cost'
 export type CephGroup = 'Ceph accounts' | 'Ceph users' | 'Ceph buckets'
 export type WorkspaceDestination =
@@ -27,7 +27,7 @@ const cephPages: Record<CephPage, string> = {
 }
 export const adminPages: Record<AdminPage, string> = {
   overview: 'Overview', metrics: 'Usage & metrics', health: 'Endpoint health', connections: 'Connections', preferences: 'Preferences', activity: 'Activity',
-  rgwIdentities: 'Managed RGW identities', costs: 'Storage costs', governance: 'Platform governance',
+  rgwIdentities: 'Managed RGW identities', costs: 'Storage costs', governance: 'Platform governance', settings: 'Workspace settings',
 }
 
 export function workspaceAvailable(profile: Connection | undefined, workspace: DesktopWorkspace): boolean {

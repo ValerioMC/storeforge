@@ -8,3 +8,4 @@ pub(crate) mod private_access;
 pub(crate) mod repository;
 pub(crate) mod rgw_identities;
 pub mod service;
+pub mod workspace_settings;

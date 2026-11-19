@@ -16,6 +16,7 @@ use tauri::{Manager, WebviewWindowBuilder};
 use administration::{
     controller as administration_commands, platform_governance::controller as governance_commands,
     rgw_identities::RgwIdentityService, service::AdministrationService,
+    workspace_settings::controller as settings_commands,
 };
 use audit::{controller as audit_commands, service::AuditService};
 use bucket::controller as bucket_commands;
@@ -126,6 +127,16 @@ pub fn run() {
             transfer_commands::restore_migration_access,
             transfer_commands::migration_action,
             governance_commands::list_platform_access,
+            settings_commands::workspace_policy_settings,
+            settings_commands::workspace_policy_resources,
+            settings_commands::save_workspace_resource_policy,
+            settings_commands::workspace_cost_settings,
+            settings_commands::workspace_readiness,
+            settings_commands::workspace_policy_accounts,
+            settings_commands::workspace_portal_account,
+            settings_commands::workspace_rotation_endpoints,
+            settings_commands::rotate_workspace_keys,
+            settings_commands::recover_workspace_rotation,
             governance_commands::export_platform_access,
             governance_commands::list_platform_groups,
             governance_commands::list_platform_connections,

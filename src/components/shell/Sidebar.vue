@@ -33,6 +33,7 @@ const adminLinks = [
   { label: 'Platform governance', icon: ShieldCheck, destination: { workspace: 'admin', page: 'governance' } },
   { label: 'Connections', icon: Cable, destination: { workspace: 'admin', page: 'connections' } },
   { label: 'Activity', icon: Activity, destination: { workspace: 'admin', page: 'activity' } },
+  { label: 'Workspace settings', icon: SlidersHorizontal, destination: { workspace: 'admin', page: 'settings' } },
   { label: 'Preferences', icon: Settings2, destination: { workspace: 'admin', page: 'preferences' } },
 ] as const
 const groups = computed(() => [
