@@ -12,7 +12,7 @@ use crate::{
 
 use super::{
     model::{Draft, Mapping, Method, Migration, Mode, Phase, Report, Side},
-    preflight::{protect, require_absent, restore_effect},
+    preflight::{PolicyAccess, protect, require_absent, restore_effect},
     repository::MigrationRepository,
 };
 
@@ -138,8 +138,12 @@ async fn failed_policy_restore_survives_restart_and_can_be_retried() {
             &session,
             Side::Source,
             "source-bucket",
-            None,
-            None
+            PolicyAccess {
+                delete_only: false,
+                deny_writes: true,
+                writer: None,
+                read_grant: None
+            },
         )
         .await
         .is_err()

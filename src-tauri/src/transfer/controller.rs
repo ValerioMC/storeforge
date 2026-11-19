@@ -155,6 +155,7 @@ pub async fn export_transfer_report(path: std::path::PathBuf, report: String) ->
 }
 
 use super::migration::{
+    execution_model::Action as MigrationAction,
     model::{Draft as MigrationDraft, MigrationView, Phase as MigrationPhase},
     service::MigrationService,
 };
@@ -200,4 +201,18 @@ pub async fn restore_migration_access(
     revision: Uuid,
 ) -> Result<MigrationView> {
     migrations.recover(&connections, id, revision).await
+}
+
+#[tauri::command]
+pub async fn migration_action(
+    migrations: State<'_, MigrationService>,
+    connections: State<'_, Arc<ConnectionService>>,
+    id: Uuid,
+    revision: Uuid,
+    action: MigrationAction,
+    confirmation: Option<String>,
+) -> Result<Option<MigrationView>> {
+    migrations
+        .action(&connections, id, revision, action, confirmation)
+        .await
 }

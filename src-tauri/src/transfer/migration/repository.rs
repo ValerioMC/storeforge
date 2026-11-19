@@ -8,7 +8,7 @@ use crate::common::{
     error::{AppError, Result},
 };
 
-use super::model::Migration;
+use super::model::{Migration, MigrationView};
 
 pub struct MigrationRepository {
     directory: PathBuf,
@@ -19,6 +19,9 @@ impl MigrationRepository {
     pub fn open(directory: PathBuf) -> Result<Self> {
         let mut records: Vec<Migration> = read_document(&directory.join("migrations.json"))?;
         for record in &mut records {
+            if let Some(run) = &mut record.run {
+                run.reconcile_after_restart();
+            }
             if record.checking.take().is_some() {
                 record.report = None;
                 if !record.private.effects.is_empty() {
@@ -33,12 +36,12 @@ impl MigrationRepository {
         })
     }
 
-    pub fn list(&self, source: Uuid) -> Result<Vec<Migration>> {
+    pub fn list(&self, source: Uuid) -> Result<Vec<MigrationView>> {
         let records = self.records.lock().map_err(|_| unavailable())?;
         Ok(records
             .iter()
             .filter(|row| row.draft.source == source)
-            .cloned()
+            .map(Migration::view)
             .collect())
     }
 
@@ -57,6 +60,15 @@ impl MigrationRepository {
         let mut updated = records.clone();
         updated.retain(|row| row.id != record.id);
         updated.insert(0, record.clone());
+        self.persist(&updated)?;
+        *records = updated;
+        Ok(())
+    }
+
+    pub fn remove(&self, id: Uuid) -> Result<()> {
+        let mut records = self.records.lock().map_err(|_| unavailable())?;
+        let mut updated = records.clone();
+        updated.retain(|row| row.id != id);
         self.persist(&updated)?;
         *records = updated;
         Ok(())

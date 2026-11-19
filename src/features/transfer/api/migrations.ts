@@ -1,5 +1,5 @@
 import { desktop } from '../../../common/tauri'
-import type { Migration, MigrationDraft, MigrationPhase } from '../model/migration'
+import type { Migration, MigrationAction, MigrationDraft, MigrationPhase } from '../model/migration'
 
 export const migrationsApi = {
   list(source: string): Promise<Migration[]> {
@@ -10,6 +10,9 @@ export const migrationsApi = {
   },
   check(record: Migration, phase: MigrationPhase, approved = false): Promise<Migration> {
     return desktop('check_migration', { id: record.id, revision: record.revision, phase, approved })
+  },
+  action(record: Migration, action: MigrationAction, confirmation: string | null): Promise<Migration | null> {
+    return desktop('migration_action', { id: record.id, revision: record.revision, action, confirmation })
   },
   restore(record: Migration): Promise<Migration> {
     return desktop('restore_migration_access', { id: record.id, revision: record.revision })

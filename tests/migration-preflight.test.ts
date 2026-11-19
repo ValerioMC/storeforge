@@ -54,7 +54,7 @@ function report(phase: MigrationReport['phase'], expiresAt: number, issues: stri
 function record(configuration: Partial<Migration>): Migration {
   return {
     id: 'migration', revision: 'rev-1', draft, updatedAt: new Date(Date.now()).toISOString(), report: null,
-    checking: null, recoveryRequired: false, recoveryError: null, ...configuration,
+    checking: null, run: null, canRestore: false, recoveryRequired: false, recoveryError: null, ...configuration,
   }
 }
 
@@ -92,7 +92,7 @@ it('confirms active checks separately and requires policy recovery after a faile
   desktop.mockImplementation(async (command, args) => {
     if (command === 'list_migrations') return [record({ report: report('read', Date.now() + 60_000) })]
     if (command === 'check_migration' && args?.phase === 'active') return record({
-      recoveryRequired: true, recoveryError: 'The provider declined the restoration.',
+      recoveryRequired: true, canRestore: true, recoveryError: 'The provider declined the restoration.',
       report: report('active', Date.now() + 60_000, ['Temporary access requires recovery.']),
     })
     if (command === 'restore_migration_access') return record({})

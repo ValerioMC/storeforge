@@ -73,9 +73,9 @@ impl Draft {
                 "Parallelism must be from 1 to 32.".into(),
             ));
         }
-        if self.method == Method::Storage && !same_endpoint(source, target) {
+        if self.method == Method::Storage && !same_namespace {
             return Err(AppError::Invalid(
-                "Storage-side copy requires connections on the same endpoint.".into(),
+                "Storage-side copy requires connections on the same endpoint and tenant.".into(),
             ));
         }
         if self.grant_source_read && self.method != Method::Storage {
@@ -128,6 +128,12 @@ pub struct Binding {
     principal: Uuid,
     tenant: String,
     revision: Option<Uuid>,
+    #[serde(default)]
+    address: String,
+    #[serde(default)]
+    account: String,
+    #[serde(default)]
+    region: String,
 }
 
 impl From<&Session> for Binding {
@@ -138,6 +144,9 @@ impl From<&Session> for Binding {
             principal: session.context.principal_id,
             tenant: session.context.tenant.clone(),
             revision: session.profile.revision,
+            address: session.profile.endpoint.clone(),
+            account: session.context.account.clone(),
+            region: session.context.region.clone(),
         }
     }
 }
@@ -215,6 +224,8 @@ pub enum Effect {
 #[derive(Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Migration {
+    #[serde(default)]
+    pub run: Option<super::execution_model::Run>,
     pub id: Uuid,
     pub revision: Uuid,
     pub draft: Draft,
@@ -237,6 +248,7 @@ pub struct PrivateState {
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct MigrationView {
+    run: Option<super::execution_model::RunView>,
     id: Uuid,
     revision: Uuid,
     draft: Draft,
@@ -244,12 +256,14 @@ pub struct MigrationView {
     report: Option<Report>,
     checking: Option<Phase>,
     recovery_required: bool,
+    can_restore: bool,
     recovery_error: Option<String>,
 }
 
 impl Migration {
     pub fn new(id: Uuid, draft: Draft, source: &Session, target: &Session) -> Self {
         Self {
+            run: None,
             id,
             revision: Uuid::new_v4(),
             draft,
@@ -265,16 +279,21 @@ impl Migration {
         }
     }
 
-    pub fn view(self) -> MigrationView {
+    pub fn view(&self) -> MigrationView {
         MigrationView {
+            run: self.run.as_ref().map(|run| run.view(&self.private.effects)),
             id: self.id,
             revision: self.revision,
-            draft: self.draft,
+            draft: self.draft.clone(),
             updated_at: self.updated_at,
-            report: self.report,
+            report: self.report.clone(),
             checking: self.checking,
-            recovery_required: !self.private.effects.is_empty() && self.checking.is_none(),
-            recovery_error: self.recovery_error,
+            recovery_required: self.recovery_error.is_some()
+                || (self.run.is_none()
+                    && !self.private.effects.is_empty()
+                    && self.checking.is_none()),
+            recovery_error: self.recovery_error.clone(),
+            can_restore: !self.private.effects.is_empty(),
         }
     }
 
@@ -285,6 +304,23 @@ impl Migration {
             return Err(AppError::Invalid(
                 "A saved connection changed. Rebind the draft before running checks.".into(),
             ));
+        }
+        Ok(())
+    }
+
+    pub fn validate_recovery_scope(&self, source: &Session, target: &Session) -> Result<()> {
+        let bindings_match = [
+            (&self.private.source_binding, source),
+            (&self.private.target_binding, target),
+        ]
+        .into_iter()
+        .all(|(saved, session)| {
+            let mut current = Binding::from(session);
+            current.revision = saved.revision;
+            current == *saved
+        });
+        if !bindings_match {
+            return Err(AppError::Invalid("The migration's endpoint or identity changed. Restore the recorded connection scope first.".into()));
         }
         Ok(())
     }

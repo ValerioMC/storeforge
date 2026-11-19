@@ -98,6 +98,7 @@ pub fn run() {
             transfer_commands::save_migration,
             transfer_commands::check_migration,
             transfer_commands::restore_migration_access,
+            transfer_commands::migration_action,
             administration_commands::administer,
             administration_commands::list_private_iam,
             administration_commands::change_private_iam,

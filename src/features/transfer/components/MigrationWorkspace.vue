@@ -10,7 +10,7 @@ import Notice from '../../../components/ui/Notice.vue'
 import type { Bucket } from '../../bucket/model/bucket'
 import type { Connection } from '../../connection/model/connection'
 import { migrationsApi } from '../api/migrations'
-import { migrationStatus, type Migration, type MigrationDraft } from '../model/migration'
+import { bucketLabels, migrationStatus, type Migration, type MigrationAction, type MigrationDraft } from '../model/migration'
 
 const props = defineProps<{ connection: string; profiles: Connection[]; buckets: Bucket[]; demo: boolean }>()
 const records = ref<Migration[]>([])
@@ -19,6 +19,25 @@ const draft = ref<MigrationDraft>()
 const error = ref('')
 const busy = ref(false)
 const confirming = ref(false)
+interface ExecutionConfirmation {
+  action: MigrationAction
+  title: string
+  description: string
+  label: string
+  confirmation: string
+  typed: boolean
+  danger: boolean
+}
+const executionConfirmation = ref<ExecutionConfirmation>()
+const execution = computed(() => selected.value?.run)
+const running = computed(() => execution.value?.status === 'copying' || execution.value?.status === 'cuttingOver')
+const cleanupAvailable = computed(() => execution.value && !running.value && execution.value.status !== 'awaitingCutover'
+  && !selected.value?.recoveryRequired)
+const incompleteNames = computed(() => cleanupAvailable.value ? execution.value?.buckets
+  .filter(bucket => bucket.owned && bucket.status !== 'removed' && bucket.status !== 'verified').map(bucket => bucket.mapping.target) ?? [] : [])
+const sourceNames = computed(() => cleanupAvailable.value ? execution.value?.buckets
+  .filter(bucket => bucket.owned && bucket.sourceProtected && bucket.status === 'verified' && !bucket.sourceDeleted)
+  .map(bucket => bucket.mapping.source) ?? [] : [])
 const now = ref(Date.now())
 const connectionOptions = computed(() => props.profiles
   .filter(profile => profile.settings?.managerEnabled !== false)
@@ -39,7 +58,8 @@ watch(() => [props.connection, props.demo], reset, { immediate: true })
 
 function tick(): void {
   now.value = Date.now()
-  if (records.value.some(record => record.checking) && !busy.value) void refresh()
+  if (records.value.some(record => record.checking || record.run?.status === 'copying' || record.run?.status === 'cuttingOver')
+    && !busy.value) void refresh()
 }
 
 function reset(): void {
@@ -50,6 +70,7 @@ function reset(): void {
   error.value = ''
   busy.value = false
   confirming.value = false
+  executionConfirmation.value = undefined
   if (!props.demo) void refresh()
 }
 
@@ -105,7 +126,7 @@ function setMethod(method: string): void {
   if (method === 'streamed') draft.value.grantSourceRead = false
 }
 
-async function run(action: () => Promise<Migration>): Promise<void> {
+async function run(action: () => Promise<Migration | null>): Promise<void> {
   if (busy.value) return
   const current = ++request
   error.value = ''
@@ -113,8 +134,13 @@ async function run(action: () => Promise<Migration>): Promise<void> {
   try {
     const record = await action()
     if (current !== request) return
-    selected.value = record
-    records.value = [record, ...records.value.filter(existing => existing.id !== record.id)]
+    if (record) {
+      selected.value = record
+      records.value = [record, ...records.value.filter(existing => existing.id !== record.id)]
+    } else {
+      records.value = records.value.filter(existing => existing.id !== selected.value?.id)
+      selected.value = undefined
+    }
   } catch (failure) {
     if (current === request) error.value = errorMessage(failure)
   } finally {
@@ -144,6 +170,54 @@ function check(approved: boolean): void {
 function recover(): void {
   const record = selected.value
   if (record) void run(() => migrationsApi.restore(record))
+}
+
+function confirmExecution(action: MigrationAction): void {
+  const record = selected.value
+  if (!record) return
+  if (action === 'start' && record.draft.mode === 'preCopy') {
+    executionConfirmation.value = {
+      action, title: 'Start pre-copy?', description: 'StoreForge will create the reviewed destination buckets. Source writes remain available until cutover.',
+      label: 'Start copy', confirmation: 'START COPY', typed: false, danger: false,
+    }
+  } else if (action === 'start' || action === 'cutover') {
+    executionConfirmation.value = {
+      action, title: 'Start cutover?', description: 'StoreForge will block source writes for the selected buckets, copy changes, and verify content, tags, and history.',
+      label: 'Start cutover', confirmation: 'CUTOVER', typed: true, danger: false,
+    }
+  } else if (action === 'stop') {
+    executionConfirmation.value = {
+      action, title: 'Stop migration?', description: 'StoreForge will finish in-flight requests, restore recorded access, and retain the bucket data.',
+      label: 'Stop migration', confirmation: '', typed: false, danger: false,
+    }
+  } else if (action === 'removeIncomplete' || action === 'deleteSources') {
+    const fromSource = action === 'deleteSources'
+    executionConfirmation.value = {
+      action, title: fromSource ? 'Delete verified source buckets?' : 'Delete incomplete destinations?',
+      description: fromSource
+        ? 'StoreForge will compare fresh SHA-256 content, exact tags, and ordered versions before deleting the source buckets and all their versions.'
+        : 'StoreForge will verify ownership before deleting these incomplete destinations and all their contents.',
+      label: fromSource ? 'Delete source buckets' : 'Delete incomplete destinations',
+      confirmation: `DELETE ${(fromSource ? sourceNames.value : incompleteNames.value).join(', ')}`,
+      typed: true, danger: true,
+    }
+  } else if (action === 'deleteRecord') {
+    executionConfirmation.value = {
+      action, title: 'Delete migration record?', description: 'This removes the saved migration history. Buckets and their contents are retained.',
+      label: 'Delete record', confirmation: 'DELETE RECORD', typed: true, danger: true,
+    }
+  }
+}
+
+function perform(action: MigrationAction, confirmation = ''): void {
+  const record = selected.value
+  executionConfirmation.value = undefined
+  if (record) void run(() => migrationsApi.action(record, action, confirmation || null))
+}
+
+function performConfirmed(): void {
+  const choice = executionConfirmation.value
+  if (choice) perform(choice.action, choice.confirmation)
 }
 
 function profileName(id: string): string {
@@ -238,15 +312,53 @@ function profileName(id: string): string {
           <p>Settings outside this plan · {{ pair.settingsOmitted.join(', ') }}</p>
         </details>
       </template>
+      <section v-if="execution" class="migration-form" aria-label="Copy progress">
+        <h3>Copy progress</h3>
+        <table class="report-table">
+          <thead><tr><th>Bucket mapping</th><th>Status</th><th>Keys</th><th>Details</th></tr></thead>
+          <tbody>
+            <tr v-for="bucket in execution.buckets" :key="bucket.mapping.source">
+              <td><code>{{ bucket.mapping.source }}</code> → <code>{{ bucket.mapping.target }}</code></td>
+              <td>{{ bucketLabels[bucket.status] }}</td><td>{{ bucket.completed }} / {{ bucket.total }}</td>
+              <td>
+                <p v-if="bucket.currentKey">Current key <code>{{ bucket.currentKey }}</code></p>
+                <p v-if="bucket.error">{{ bucket.error }}</p>
+                <p v-if="bucket.cleanupError">{{ bucket.cleanupError }}</p>
+                <p v-if="bucket.sourceDeleted">Source deleted</p>
+                <p v-else-if="bucket.sourceProtected">Source access changes recorded</p>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
       <div class="panel-actions">
-        <button v-if="selected.recoveryRequired" class="primary" :disabled="busy" @click="recover">Restore access</button>
-        <template v-else>
+        <button v-if="selected.canRestore && !running" class="primary" :disabled="busy" @click="recover">Restore access</button>
+        <template v-if="execution">
+          <template v-if="running">
+            <button :disabled="busy" @click="perform('pause')">Pause copy</button>
+            <button :disabled="busy" @click="confirmExecution('stop')">Stop migration</button>
+          </template>
+          <template v-else-if="!selected.recoveryRequired">
+            <button v-if="execution.status === 'paused'" class="primary" :disabled="busy" @click="perform('resume')">Resume copy</button>
+            <button v-if="execution.status === 'failed'" :disabled="busy" @click="perform('retry')">Retry failed buckets</button>
+            <button v-if="execution.status === 'awaitingCutover'" class="primary" :disabled="busy" @click="confirmExecution('cutover')">Review cutover</button>
+            <button v-if="['paused', 'awaitingCutover', 'failed'].includes(execution.status)" :disabled="busy" @click="confirmExecution('stop')">Stop migration</button>
+            <button v-if="incompleteNames.length" class="danger-outline" :disabled="busy" @click="confirmExecution('removeIncomplete')">Delete incomplete destinations</button>
+            <button v-if="sourceNames.length" class="danger-outline" :disabled="busy" @click="confirmExecution('deleteSources')">Delete source buckets</button>
+          </template>
+        </template>
+        <template v-else-if="!selected.recoveryRequired">
           <button :disabled="busy || !!selected.checking" @click="edit">Edit draft</button>
           <button :disabled="busy || !!selected.checking" @click="check(false)">Run read-only checks</button>
           <button v-if="status === 'Ready for active checks'" class="primary" :disabled="busy" @click="confirming = true">Review active checks</button>
+          <button v-if="status === 'Reviewed'" class="primary" :disabled="busy" @click="confirmExecution('start')">Review start copy</button>
         </template>
+        <button v-if="!selected.canRestore && !running && !selected.checking" :disabled="busy" @click="confirmExecution('deleteRecord')">Delete record</button>
       </div>
     </template>
+    <ConfirmDialog v-if="executionConfirmation" :title="executionConfirmation.title" :description="executionConfirmation.description"
+      :action="executionConfirmation.label" :phrase="executionConfirmation.typed ? executionConfirmation.confirmation : undefined"
+      :danger="executionConfirmation.danger" @close="executionConfirmation = undefined" @confirm="performConfirmed" />
     <ConfirmDialog v-if="confirming" title="Run active checks?"
       description="StoreForge temporarily blocks source writes, creates a disposable destination, and tests object, tag, multipart, and configuration access. It restores the recorded source policy when the checks finish."
       action="Run active checks" @close="confirming = false" @confirm="check(true)">

@@ -19,6 +19,7 @@ use crate::{
 
 use super::{
     model::{Draft, Effect, Mapping, Method, Migration, PairPlan, Side},
+    ownership,
     repository::MigrationRepository,
 };
 
@@ -64,6 +65,14 @@ pub async fn read_pair(
     draft: &Draft,
     mapping: &Mapping,
 ) -> PairCheck {
+    let mut check = inspect_source(source, draft, mapping).await;
+    if let Err(error) = require_absent(&target.s3, &mapping.target).await {
+        check.plan.issues.push(error.to_string());
+    }
+    check
+}
+
+pub async fn inspect_source(source: &Session, draft: &Draft, mapping: &Mapping) -> PairCheck {
     let mut check = PairCheck {
         plan: PairPlan {
             mapping: mapping.clone(),
@@ -75,9 +84,6 @@ pub async fn read_pair(
         sample: None,
         settings: Vec::new(),
     };
-    if let Err(error) = require_absent(&target.s3, &mapping.target).await {
-        check.plan.issues.push(error.to_string());
-    }
     match sample_object(source, draft, &mapping.source).await {
         Ok(None) if draft.method == Method::Storage => check.plan.issues.push(
             "Storage-side copy needs a representative source object. Choose streamed copy.".into(),
@@ -219,6 +225,10 @@ fn setting_state(
         Encryption => Ok(draft.settings && has("Rule")),
         Lifecycle => Ok(has("Rule")),
         Cors => Ok(has("CORSRule")),
+        Tagging if xml.iter().filter(|element| element.as_str() == "Tag").count() >= 50
+            || document.contains(ownership::RECEIPT_TAG) => Err(
+                "Source bucket tags leave no slot for the migration ownership receipt.".into(),
+            ),
         Tagging => Ok(has("Tag")),
         _ => Ok(draft.settings),
     }
@@ -280,8 +290,14 @@ pub async fn active_pair(
         source,
         Side::Source,
         source_bucket,
-        None,
-        principal.as_deref(),
+        PolicyAccess {
+            delete_only: false,
+            deny_writes: true,
+            writer: None,
+            read_grant: principal
+                .as_deref()
+                .filter(|_| record.draft.grant_source_read),
+        },
     )
     .await?;
     if let Some(object) = &check.sample {
@@ -300,6 +316,7 @@ pub async fn active_pair(
         *created = true;
     }
     repository.save(record)?;
+    ownership::probe_tagging(target, &probe).await?;
     if record.draft.protect_destination {
         protect(
             repository,
@@ -307,8 +324,12 @@ pub async fn active_pair(
             target,
             Side::Target,
             &probe,
-            principal.as_deref(),
-            None,
+            PolicyAccess {
+                delete_only: false,
+                deny_writes: true,
+                writer: principal.as_deref(),
+                read_grant: None,
+            },
         )
         .await?;
     }
@@ -362,7 +383,7 @@ pub async fn worker_principal(draft: &Draft, target: &Session) -> Result<Option<
     sts::caller_principal(target).await.map(Some)
 }
 
-async fn verify_sample_read(source: &Session, object: &ObjectId) -> Result<()> {
+pub async fn verify_sample_read(source: &Session, object: &ObjectId) -> Result<()> {
     let head = objects::head(&source.s3, object)
         .await
         .map_err(|_| AppError::Storage("Could not recheck source object metadata.".into()))?;
@@ -592,47 +613,83 @@ pub async fn policy(client: &Client, bucket: &str) -> Result<Option<Value>> {
     }
 }
 
+pub struct PolicyAccess<'a> {
+    pub delete_only: bool,
+    pub deny_writes: bool,
+    pub writer: Option<&'a str>,
+    pub read_grant: Option<&'a str>,
+}
+
 pub async fn protect(
     repository: &MigrationRepository,
     record: &mut Migration,
     session: &Session,
     side: Side,
     bucket: &str,
-    except: Option<&str>,
-    grant: Option<&str>,
+    access: PolicyAccess<'_>,
 ) -> Result<()> {
-    let original = policy(&session.s3, bucket).await?;
-    let protection = build_protection(
-        original.clone(),
-        record.id,
-        session,
-        bucket,
-        except,
-        grant.filter(|_| record.draft.grant_source_read),
-    )?;
+    let current = policy(&session.s3, bucket).await?;
+    let mut receipts = record
+        .private
+        .effects
+        .iter()
+        .filter_map(|effect| match effect {
+            Effect::Policy {
+                side: bound,
+                bucket: name,
+                original,
+                protection,
+            } if *bound == side && name == bucket => Some((original, protection)),
+            _ => None,
+        });
+    let first = receipts.next();
+    let latest = receipts.last().or(first);
+    let earliest = first.map_or_else(|| current.clone(), |(original, _)| original.clone());
+    let protection = build_protection(earliest, record.id, session, bucket, access)?;
+    if let Some((original, last)) = latest {
+        if current.as_ref() != original.as_ref() && current.as_ref() != Some(last) {
+            return Err(AppError::Invalid(
+                "A recorded migration policy changed outside StoreForge.".into(),
+            ));
+        }
+        if *last == protection {
+            if current.as_ref() != Some(last) {
+                write_policy(&session.s3, bucket, Some(last)).await?;
+            }
+            return verify_policy(session, bucket, last).await;
+        }
+        if current.as_ref() != Some(last) {
+            return Err(AppError::Invalid(
+                "Restore interrupted policy changes before switching protections.".into(),
+            ));
+        }
+    }
     record.private.effects.push(Effect::Policy {
         side,
         bucket: bucket.into(),
-        original,
+        original: current,
         protection: protection.clone(),
     });
     repository.save(record)?;
     write_policy(&session.s3, bucket, Some(&protection)).await?;
-    if policy(&session.s3, bucket).await?.as_ref() != Some(&protection) {
+    verify_policy(session, bucket, &protection).await
+}
+
+pub async fn verify_policy(session: &Session, bucket: &str, expected: &Value) -> Result<()> {
+    if policy(&session.s3, bucket).await?.as_ref() != Some(expected) {
         return Err(AppError::Storage(
-            "The provider did not verify the write protection.".into(),
+            "The provider did not verify the recorded protection.".into(),
         ));
     }
     Ok(())
 }
 
-fn build_protection(
+pub(super) fn build_protection(
     original: Option<Value>,
     id: Uuid,
     session: &Session,
     bucket: &str,
-    except: Option<&str>,
-    grant: Option<&str>,
+    access: PolicyAccess<'_>,
 ) -> Result<Value> {
     let mut document = original.unwrap_or_else(|| json!({ "Version": "2012-10-17" }));
     let mut statements = match document.get("Statement") {
@@ -656,24 +713,38 @@ fn build_protection(
         ));
     }
     let partition = sts::partition(&session.profile.region);
-    let name = if session.profile.provider == Provider::Ceph && !session.context.tenant.is_empty() {
-        format!("{}/{}", session.context.tenant, bucket)
-    } else {
-        bucket.to_owned()
-    };
-    let resource = format!("arn:{partition}:s3:::{name}/*");
+    let resource = format!("arn:{partition}:s3:::{bucket}/*");
     let mut deny = json!({
-        "Sid": sid, "Effect": "Deny", "Principal": "*",
+        "Sid": sid, "Effect": "Deny",
         "Action": ["s3:PutObject", "s3:DeleteObject", "s3:DeleteObjectVersion", "s3:PutObjectTagging",
                    "s3:DeleteObjectTagging", "s3:PutObjectVersionTagging", "s3:DeleteObjectVersionTagging",
                    "s3:AbortMultipartUpload", "s3:PutObjectAcl", "s3:PutObjectVersionAcl"],
         "Resource": resource,
     });
-    if let Some(principal) = except {
-        deny["Condition"] = json!({ "ArnNotEquals": { "aws:PrincipalArn": principal } });
+    if let Some(principal) = access.writer {
+        if session.profile.provider == Provider::Ceph {
+            deny["NotPrincipal"] = json!({ "AWS": principal });
+        } else {
+            deny["Principal"] = json!("*");
+            deny["Condition"] = json!({ "ArnNotEquals": { "aws:PrincipalArn": principal } });
+        }
+        if access.delete_only {
+            deny["Action"] = json!(["s3:DeleteObject", "s3:DeleteObjectVersion"]);
+            statements.push(json!({
+                "Sid": format!("{sid}NoOtherWrites"), "Effect": "Deny", "Principal": "*",
+                "Action": ["s3:PutObject", "s3:PutObjectTagging", "s3:DeleteObjectTagging", "s3:PutObjectVersionTagging",
+                           "s3:DeleteObjectVersionTagging", "s3:PutObjectAcl", "s3:PutObjectVersionAcl"],
+                "Resource": resource,
+            }));
+        }
     }
-    statements.push(deny);
-    if let Some(principal) = grant {
+    if access.writer.is_none() {
+        deny["Principal"] = json!("*");
+    }
+    if access.deny_writes {
+        statements.push(deny);
+    }
+    if let Some(principal) = access.read_grant {
         statements.push(json!({
             "Sid": format!("{sid}Read"), "Effect": "Allow", "Principal": { "AWS": principal },
             "Action": ["s3:GetObject", "s3:GetObjectVersion"], "Resource": resource,

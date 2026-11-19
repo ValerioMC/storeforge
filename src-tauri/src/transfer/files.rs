@@ -32,6 +32,7 @@ pub struct UploadOptions<'a> {
     pub overwrite: bool,
     pub expected_etag: Option<String>,
     pub metadata: Option<HashMap<String, String>>,
+    pub tagging: Option<String>,
     pub cache_control: Option<String>,
     pub content_disposition: Option<String>,
     pub content_encoding: Option<String>,
@@ -82,6 +83,7 @@ pub async fn upload_observed(
         .key(key)
         .content_type(options.content_type)
         .set_metadata(options.metadata)
+        .set_tagging(options.tagging)
         .set_cache_control(options.cache_control)
         .set_content_disposition(options.content_disposition)
         .set_content_encoding(options.content_encoding)
@@ -122,6 +124,7 @@ async fn multipart_upload(
         .key(key)
         .content_type(options.content_type)
         .set_metadata(options.metadata)
+        .set_tagging(options.tagging)
         .set_cache_control(options.cache_control)
         .set_content_disposition(options.content_disposition)
         .set_content_encoding(options.content_encoding)

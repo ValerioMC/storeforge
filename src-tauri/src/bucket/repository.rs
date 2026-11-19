@@ -89,7 +89,7 @@ fn resource(configuration: Configuration) -> (&'static str, &'static str, bool) 
     (subresource, "application/xml", removable)
 }
 
-fn configuration_url(session: &Session, bucket: &str, subresource: &str) -> Result<Url> {
+pub(crate) fn configuration_url(session: &Session, bucket: &str, subresource: &str) -> Result<Url> {
     let endpoint = if session.profile.endpoint.is_empty() {
         let suffix = if session.profile.region.starts_with("cn-") {
             "amazonaws.com.cn"
